@@ -1,13 +1,17 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Reflection;
-using System.Text;
 
 namespace SimpleMCPBridge.Runtime
 {
     /// <summary>
     /// Discovers [MCPTool]-annotated methods at startup and provides
     /// tool listing + dispatch.
+    ///
+    /// AutoRegisterAll scans all loaded assemblies for [MCPTool] handlers.
+    ///
+    /// PowerUtilities.ReflectionTools 提供更多反射工具方法，
+    /// 如需使用请确保已安装 PowerUtilities 包。
     /// </summary>
     public class MCPToolRegistry
     {
@@ -35,27 +39,56 @@ namespace SimpleMCPBridge.Runtime
                 if (parameters.Length != 1 || parameters[0].ParameterType != typeof(string))
                 {
                     UnityEngine.Debug.LogWarning(
-                        $"[MCPToolRegistry] Skipping '{type.Name}.{method.Name}': " +
-                        $"must accept a single string parameter (paramsJson).");
+                        $"[MCPToolRegistry] Skipping '{type.Name}.{method.Name}': must accept a single string parameter (paramsJson).");
                     continue;
                 }
                 if (method.ReturnType != typeof(string))
                 {
                     UnityEngine.Debug.LogWarning(
-                        $"[MCPToolRegistry] Skipping '{type.Name}.{method.Name}': " +
-                        $"must return string.");
+                        $"[MCPToolRegistry] Skipping '{type.Name}.{method.Name}': must return string.");
                     continue;
                 }
 
                 if (_tools.ContainsKey(attr.Name))
                 {
                     UnityEngine.Debug.LogWarning(
-                        $"[MCPToolRegistry] Duplicate tool name '{attr.Name}' from " +
-                        $"'{type.Name}.{method.Name}' — keeping first registration.");
+                        $"[MCPToolRegistry] Duplicate tool name '{attr.Name}' from '{type.Name}.{method.Name}' — keeping first registration.");
                     continue;
                 }
 
                 _tools[attr.Name] = new ToolEntry(attr.Name, attr.Description, method, handlerInstance);
+            }
+        }
+
+        /// <summary>
+        /// Auto-discover all [MCPTool] handlers by scanning all loaded assemblies.
+        /// Only types with a parameterless constructor are auto-registered;
+        /// abstract/interface types and types that fail to instantiate are skipped.
+        /// </summary>
+        public void AutoRegisterAll()
+        {
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                foreach (var type in assembly.GetTypes())
+                {
+                    if (type.IsAbstract || type.IsInterface) continue;
+                    if (type.GetConstructor(Type.EmptyTypes) == null) continue;
+
+                    foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                    {
+                        if (method.GetCustomAttribute<MCPToolAttribute>() != null)
+                        {
+                            try
+                            {
+                                var instance = Activator.CreateInstance(type);
+                                Register(instance);
+                                UnityEngine.Debug.Log($"[MCPToolRegistry] Auto-registered '{type.Name}'");
+                            }
+                            catch { }
+                            break; // move to next type
+                        }
+                    }
+                }
             }
         }
 
@@ -94,7 +127,7 @@ namespace SimpleMCPBridge.Runtime
             {
                 entries.Add(tool.ToJson());
             }
-            return "[" + string.Join(",", entries) + "]";
+            return $"[{string.Join(",", entries)}]";
         }
 
         // ── Internal ──
@@ -116,18 +149,8 @@ namespace SimpleMCPBridge.Runtime
 
             public string ToJson()
             {
-                // Build inputSchema from method parameters
-                // Currently all tools take a single "paramsJson" string
-                var sb = new StringBuilder();
-                sb.Append('{');
-                sb.Append("\"name\":").Append(JsonHelper.EscapeString(Name)).Append(',');
-                sb.Append("\"description\":").Append(JsonHelper.EscapeString(Description)).Append(',');
-                sb.Append("\"inputSchema\":{");
-                sb.Append("\"type\":\"object\",");
-                sb.Append("\"properties\":{}");  // params are embedded in paramsJson
-                sb.Append("}");
-                sb.Append('}');
-                return sb.ToString();
+                // params are embedded in paramsJson, so properties stays empty
+                return $@"{{""name"":{JsonHelper.EscapeString(Name)},""description"":{JsonHelper.EscapeString(Description)},""inputSchema"":{{""type"":""object"",""properties"":{{}}}}}}";
             }
         }
     }

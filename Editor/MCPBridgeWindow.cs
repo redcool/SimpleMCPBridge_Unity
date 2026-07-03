@@ -1,4 +1,5 @@
-﻿using SimpleMCPBridge.Runtime;
+﻿#if UNITY_EDITOR
+using SimpleMCPBridge.Runtime;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
@@ -9,62 +10,93 @@ namespace SimpleMCPBridge.Editor
     /// Editor Window for controlling the SimpleMCPBridge connection.
     /// Provides Server IP/Port, Bridge GUID display, Connect/Disconnect toggle,
     /// and real-time status (including connection failure reasons).
-    /// Also drains the bridge's main-thread queue in Edit Mode.
+    ///
+    /// Bridge lifecycle (create Default, DrainQueue, auto-reconnect) runs in a
+    /// static EditorApplication.update handler. The handler is subscribed once
+    /// when the user first opens the window (ShowWindow) and cleaned up on
+    /// EditorApplication.quitting — NOT tied to OnEnable/OnDisable.
+    /// After domain reload, the static constructor re-subscribes automatically.
+    ///
+    /// This ensures the bridge keeps working even when the window is closed.
     ///
     /// Config is stored in Assets/SimpleMCPBridge/bridge-config.json.
-    /// Open via: Tools > SimpleMCPBridge
+    /// Open via: PowerUtilities > SimpleMCPBridge
     /// </summary>
+    [InitializeOnLoad]
     public class MCPBridgeWindow : EditorWindow
     {
-        private string _serverIp = "127.0.0.1";
-        private int _serverPort = 45678;
-        private string _bridgeId;
-        private MCPBridge _bridge;
-        private bool _isConnecting;
-        private string _lastError; // displayed when connection fails
+        // ── Static lifecycle (independent of window open/close) ──
 
-        // ── Config path ──
-        private static string ConfigPath => Path.Combine(Application.dataPath, "SimpleMCPBridge", "bridge-config.json");
+        private const string k_ActivatedKey = "SimpleMCPBridge_Activated";
 
-        // ── Window registration ──
+        private static string s_serverIp = "127.0.0.1";
+        private static int s_serverPort = 45678;
 
-        [MenuItem("Tools/SimpleMCPBridge")]
-        public static void ShowWindow()
+        /// <summary>
+        /// Persisted flag: true after user first clicks Connect.
+        /// Survives domain reload. StaticUpdate no-ops until this is true.
+        /// </summary>
+        private static bool s_activated
         {
-            var window = GetWindow<MCPBridgeWindow>("SimpleMCPBridge");
-            window.minSize = new Vector2(380, 300);
-            window.Show();
+            get => EditorPrefs.GetBool(k_ActivatedKey, false);
+            set => EditorPrefs.SetBool(k_ActivatedKey, value);
         }
 
-        // ── Initialization ──
-
-        private void OnEnable()
+        /// <summary>
+        /// Static constructor: fires on every domain reload.
+        /// Subscribes EditorApplication.update unconditionally (safe via -= before +=).
+        /// StaticUpdate itself gates on s_activated, so it no-ops until user connects.
+        /// </summary>
+        static MCPBridgeWindow()
         {
-            // Generate a new GUID each time the window opens
-            _bridgeId = System.Guid.NewGuid().ToString("N");
-
-            // Load config from json file
-            LoadConfig();
-            EditorApplication.update += OnEditorUpdate;
+            LoadStaticConfig();
+            EditorApplication.update -= StaticUpdate;
+            EditorApplication.update += StaticUpdate;
+            EditorApplication.quitting -= OnEditorQuit;
+            EditorApplication.quitting += OnEditorQuit;
         }
 
-        private void OnDisable()
+        private static void OnEditorQuit()
         {
-            EditorApplication.update -= OnEditorUpdate;
+            EditorApplication.update -= StaticUpdate;
         }
 
-        private void LoadConfig()
+        private static void StaticUpdate()
         {
+            // Until user opens window + clicks Connect, do nothing
+            if (!s_activated) return;
+
+            // Ensure Default bridge exists
+            if (MCPBridge.Default == null)
+            {
+                var bridge = new MCPBridge();
+                MCPBridge.Default = bridge;
+                Runtime.AIRequest.Register(bridge);
+            }
+
+            var b = MCPBridge.Default;
+            b.DrainQueue();
+
+            // Auto-reconnect: if disconnected and user wants it
+            if (!b.IsConnected && b.IsAutoReconnect)
+            {
+                b.ConnectToServer(s_serverIp, s_serverPort);
+            }
+        }
+
+        private static void LoadStaticConfig()
+        {
+            var configPath = Path.Combine(Application.dataPath, "SimpleMCPBridge", "bridge-config.json");
             try
             {
-                if (File.Exists(ConfigPath))
+                if (File.Exists(configPath))
                 {
-                    var json = File.ReadAllText(ConfigPath);
+                    var json = File.ReadAllText(configPath);
                     var cfg = JsonUtility.FromJson<ConfigData>(json);
                     if (cfg != null)
                     {
-                        _serverIp = string.IsNullOrEmpty(cfg.serverIp) ? _serverIp : cfg.serverIp;
-                        _serverPort = cfg.serverPort > 0 ? cfg.serverPort : _serverPort;
+                        s_serverIp = string.IsNullOrEmpty(cfg.serverIp) ? s_serverIp : cfg.serverIp;
+                        s_serverPort = cfg.serverPort > 0 ? s_serverPort : s_serverPort;
                     }
                 }
             }
@@ -74,36 +106,55 @@ namespace SimpleMCPBridge.Editor
             }
         }
 
-        private void SaveConfig()
+        // ── Instance fields (per open window) ──
+
+        private string _bridgeId;
+        private MCPBridge _bridge;
+        private bool _isConnecting;
+        private string _lastError;
+
+        private static string ConfigPath => Path.Combine(Application.dataPath, "SimpleMCPBridge", "bridge-config.json");
+
+        // ── Window registration ──
+
+        [MenuItem("PowerUtilities/SimpleMCPBridge/MCPBridgeWindow")]
+        public static void ShowWindow()
         {
-            try
-            {
-                var dir = Path.GetDirectoryName(ConfigPath);
-                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-                var cfg = new ConfigData { serverIp = _serverIp, serverPort = _serverPort };
-                File.WriteAllText(ConfigPath, JsonUtility.ToJson(cfg, true));
-            }
-            catch (System.Exception ex)
-            {
-                Debug.LogWarning($"[MCPBridgeWindow] Failed to save bridge-config.json: {ex.Message}");
-            }
+            // Subscription is handled by static constructor, not here.
+            var window = GetWindow<MCPBridgeWindow>("SimpleMCPBridge");
+            window.minSize = new Vector2(380, 300);
+            window.Show();
         }
 
-        /// <summary>
-        /// Editor tick. Drains the bridge's main-thread queue in Edit Mode.
-        /// </summary>
-        private void OnEditorUpdate()
+        // ── Initialization ──
+
+        private void OnEnable()
         {
+            _bridgeId = System.Guid.NewGuid().ToString("N");
+            // Adopt the Default bridge created by StaticUpdate
+            _bridge = MCPBridge.Default;
             if (_bridge != null)
-            {
-                _bridge.DrainQueue();
-            }
+                WireBridgeEvents(_bridge);
+        }
+
+        private void OnDisable()
+        {
+            // Detach only — StaticUpdate keeps draining and reconnecting
+            _bridge = null;
+            _isConnecting = false;
         }
 
         // ── GUI ──
 
         private void OnGUI()
         {
+            // Re-adopt Default if window was closed and re-opened
+            if (_bridge == null && MCPBridge.Default != null)
+            {
+                _bridge = MCPBridge.Default;
+                WireBridgeEvents(_bridge);
+            }
+
             // Header
             EditorGUILayout.LabelField("SimpleMCPBridge for Unity", EditorStyles.boldLabel);
             EditorGUILayout.LabelField("Connect to SimpleMcpServer via WebSocket", EditorStyles.miniLabel);
@@ -113,14 +164,14 @@ namespace SimpleMCPBridge.Editor
             using (new EditorGUILayout.HorizontalScope())
             {
                 EditorGUILayout.LabelField("Server IP", GUILayout.Width(100));
-                _serverIp = EditorGUILayout.TextField(_serverIp);
+                s_serverIp = EditorGUILayout.TextField(s_serverIp);
             }
 
             // Server Port field
             using (new EditorGUILayout.HorizontalScope())
             {
                 EditorGUILayout.LabelField("Server Port", GUILayout.Width(100));
-                _serverPort = EditorGUILayout.IntField(_serverPort);
+                s_serverPort = EditorGUILayout.IntField(s_serverPort);
             }
 
             EditorGUILayout.Space(4);
@@ -129,7 +180,8 @@ namespace SimpleMCPBridge.Editor
             using (new EditorGUILayout.HorizontalScope())
             {
                 EditorGUILayout.LabelField("Bridge ID", GUILayout.Width(100));
-                EditorGUILayout.SelectableLabel(_bridgeId, EditorStyles.textField, GUILayout.Height(18));
+                var displayId = _bridge != null ? _bridge.BridgeId : _bridgeId;
+                EditorGUILayout.SelectableLabel(displayId, EditorStyles.textField, GUILayout.Height(18));
             }
 
             EditorGUILayout.Space(8);
@@ -145,9 +197,7 @@ namespace SimpleMCPBridge.Editor
             {
                 GUI.color = new Color(1f, 0.5f, 0.5f);
                 if (GUILayout.Button("■  Disconnect", GUILayout.Height(36)))
-                {
                     DisconnectFromServer();
-                }
                 GUI.color = Color.white;
             }
             else
@@ -155,21 +205,17 @@ namespace SimpleMCPBridge.Editor
                 GUI.enabled = !_isConnecting;
                 GUI.color = new Color(0.5f, 1f, 0.5f);
                 if (GUILayout.Button("▶  Connect to Server", GUILayout.Height(36)))
-                {
                     ConnectToServer();
-                }
                 GUI.color = Color.white;
                 GUI.enabled = true;
             }
 
-            // Connecting indicator
             if (_isConnecting)
             {
                 EditorGUILayout.Space(4);
                 EditorGUILayout.LabelField("Connecting...", EditorStyles.miniLabel);
             }
 
-            // Connection error display
             if (!string.IsNullOrEmpty(_lastError) && !connected && !_isConnecting)
             {
                 EditorGUILayout.Space(4);
@@ -208,53 +254,74 @@ namespace SimpleMCPBridge.Editor
 
         private void ConnectToServer()
         {
-            if (_bridge != null) return;
+            if (_bridge != null && _bridge.IsConnected)
+                return;
+
+            if (_bridge == null)
+            {
+                _bridge = MCPBridge.Default ??= new MCPBridge();
+                Runtime.AIRequest.Register(_bridge);
+                WireBridgeEvents(_bridge);
+            }
 
             _isConnecting = true;
             _lastError = null;
             SaveConfig();
             Repaint();
 
-            var go = new GameObject("[SimpleMCPBridge]");
-            go.hideFlags = HideFlags.HideAndDontSave;
+            s_activated = true;
+            _bridge.IsAutoReconnect = true;
+            _bridge.ConnectToServer(s_serverIp, s_serverPort);
+            Debug.Log($"[MCPBridgeWindow] Connecting to ws://{s_serverIp}:{s_serverPort} (ID: {_bridge?.BridgeId ?? "null"})");
+        }
 
-            _bridge = go.AddComponent<MCPBridge>();
-            _bridge.BridgeId = _bridgeId;
+        private void WireBridgeEvents(MCPBridge bridge)
+        {
+            bridge.OnConnectionFailed -= OnBridgeConnectionFailed;
+            bridge.OnConnectedSuccess -= OnBridgeConnectedSuccess;
+            bridge.OnConnectionFailed += OnBridgeConnectionFailed;
+            bridge.OnConnectedSuccess += OnBridgeConnectedSuccess;
+        }
 
-            // Wire up status callbacks
-            _bridge.OnConnectionFailed += (reason) =>
-            {
-                _lastError = reason;
-                _isConnecting = false;
-                Repaint();
-                Debug.Log($"[MCPBridgeWindow] Connection failed: {reason}");
-            };
+        private void OnBridgeConnectionFailed(string reason)
+        {
+            _lastError = reason;
+            _isConnecting = false;
+            Repaint();
+            Debug.Log($"[MCPBridgeWindow] Connection failed: {reason}");
+        }
 
-            _bridge.OnConnectedSuccess += () =>
-            {
-                _lastError = null;
-                _isConnecting = false;
-                Repaint();
-            };
-
-            _bridge.ConnectToServer(_serverIp, _serverPort);
-            Debug.Log($"[MCPBridgeWindow] Connecting to ws://{_serverIp}:{_serverPort} (ID: {_bridgeId})");
+        private void OnBridgeConnectedSuccess()
+        {
+            _lastError = null;
+            _isConnecting = false;
+            Repaint();
         }
 
         private void DisconnectFromServer()
         {
             if (_bridge == null) return;
-
+            _bridge.IsAutoReconnect = false;
             _bridge.Disconnect();
-
-            if (_bridge.gameObject != null)
-                DestroyImmediate(_bridge.gameObject);
-
-            _bridge = null;
             _isConnecting = false;
             _lastError = null;
             Repaint();
             Debug.Log("[MCPBridgeWindow] Disconnected");
+        }
+
+        private void SaveConfig()
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(ConfigPath);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                var cfg = new ConfigData { serverIp = s_serverIp, serverPort = s_serverPort };
+                File.WriteAllText(ConfigPath, JsonUtility.ToJson(cfg, true));
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning($"[MCPBridgeWindow] Failed to save bridge-config.json: {ex.Message}");
+            }
         }
 
         // ── Config model ──
@@ -267,3 +334,4 @@ namespace SimpleMCPBridge.Editor
         }
     }
 }
+#endif

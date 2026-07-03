@@ -1,7 +1,5 @@
-﻿using SimpleMCPBridge.Runtime.Handlers;
-using SimpleMCPBridge.Runtime.Models;
+﻿using SimpleMCPBridge.Runtime.Models;
 using System;
-using System.Text;
 using UnityEngine;
 
 namespace SimpleMCPBridge.Runtime
@@ -9,6 +7,10 @@ namespace SimpleMCPBridge.Runtime
     /// <summary>
     /// Receives raw JSON-RPC messages from WebSocket clients,
     /// routes to the appropriate handler via MCPToolRegistry, and returns a response.
+    ///
+    /// Handlers are auto-discovered at construction time by scanning
+    /// all assemblies for [MCPTool]-annotated methods (uses TypeCache
+    /// in Editor, assembly scan in Runtime).
     /// </summary>
     public class MessageRouter
     {
@@ -17,10 +19,7 @@ namespace SimpleMCPBridge.Runtime
         public MessageRouter()
         {
             _registry = new MCPToolRegistry();
-
-            // Register all handler instances.
-            // The scanner picks up [MCPTool]-annotated methods from each.
-            _registry.Register(new SceneHandler());
+            _registry.AutoRegisterAll();
         }
 
         /// <summary>
@@ -60,7 +59,7 @@ namespace SimpleMCPBridge.Runtime
         private string Dispatch(MCPRequest request)
         {
             // ── Special built-in: list all registered tools ──
-            if (request.method == "mcp.list_tools")
+            if (request.method == MCPMethodConst.LIST_TOOLS)
                 return BuildSuccessResponse(request.id, _registry.ListToolsJson());
 
             // ── Route to registered tool handler ──
@@ -92,15 +91,8 @@ namespace SimpleMCPBridge.Runtime
 
         private string BuildSuccessResponse(string requestId, string resultJson)
         {
-            // Manually build the response so result is embedded as raw JSON,
-            // not as an escaped string inside a string.
-            var sb = new StringBuilder();
-            sb.Append('{');
-            sb.Append("\"id\":").Append(JsonHelper.EscapeString(requestId ?? "")).Append(',');
-            sb.Append("\"result\":").Append(resultJson ?? "null").Append(',');
-            sb.Append("\"error\":null");
-            sb.Append('}');
-            return sb.ToString();
+            // Build manually so result is embedded as raw JSON, not an escaped string.
+            return $@"{{""id"":{JsonHelper.EscapeString(requestId ?? "")},""result"":{resultJson ?? "null"},""error"":null}}";
         }
     }
 }

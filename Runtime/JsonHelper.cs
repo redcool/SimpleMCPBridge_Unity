@@ -1,4 +1,6 @@
-using System;
+﻿using System;
+using System.Globalization;
+using System.Linq;
 using System.Text;
 
 namespace SimpleMCPBridge.Runtime
@@ -8,7 +10,7 @@ namespace SimpleMCPBridge.Runtime
     /// JsonUtility cannot handle top-level arrays, so we provide
     /// wrappers and manual builders for common patterns.
     /// </summary>
-    internal static class JsonHelper
+    public static class JsonHelper
     {
         /// <summary>
         /// Wrap an array in a serializable container for JsonUtility.ToJson.
@@ -35,17 +37,8 @@ namespace SimpleMCPBridge.Runtime
         /// </summary>
         public static string BuildJsonObject(params (string key, string valueJson)[] fields)
         {
-            var sb = new StringBuilder("{");
-            for (int i = 0; i < fields.Length; i++)
-            {
-                if (i > 0) sb.Append(",");
-                sb.Append('"');
-                sb.Append(fields[i].key);
-                sb.Append("\":");
-                sb.Append(fields[i].valueJson);
-            }
-            sb.Append("}");
-            return sb.ToString();
+            if (fields == null || fields.Length == 0) return "{}";
+            return $"{{{string.Join(",", fields.Select(f => $"\"{f.key}\":{f.valueJson}"))}}}";
         }
 
         /// <summary>
@@ -79,14 +72,8 @@ namespace SimpleMCPBridge.Runtime
         /// </summary>
         public static string BuildJsonArray(params string[] elementJsons)
         {
-            var sb = new StringBuilder("[");
-            for (int i = 0; i < elementJsons.Length; i++)
-            {
-                if (i > 0) sb.Append(",");
-                sb.Append(elementJsons[i]);
-            }
-            sb.Append("]");
-            return sb.ToString();
+            if (elementJsons == null || elementJsons.Length == 0) return "[]";
+            return $"[{string.Join(",", elementJsons)}]";
         }
 
         /// <summary>
@@ -99,16 +86,8 @@ namespace SimpleMCPBridge.Runtime
         /// </summary>
         public static string FloatArrayJson(float[] values)
         {
-            if (values == null || values.Length == 0)
-                return "[]";
-            var sb = new StringBuilder("[");
-            for (int i = 0; i < values.Length; i++)
-            {
-                if (i > 0) sb.Append(",");
-                sb.Append(values[i].ToString("G", System.Globalization.CultureInfo.InvariantCulture));
-            }
-            sb.Append("]");
-            return sb.ToString();
+            if (values == null || values.Length == 0) return "[]";
+            return $"[{string.Join(",", values.Select(v => v.ToString("G", CultureInfo.InvariantCulture)))}]";
         }
 
         /// <summary>
@@ -116,16 +95,8 @@ namespace SimpleMCPBridge.Runtime
         /// </summary>
         public static string StringArrayJson(string[] values)
         {
-            if (values == null || values.Length == 0)
-                return "[]";
-            var sb = new StringBuilder("[");
-            for (int i = 0; i < values.Length; i++)
-            {
-                if (i > 0) sb.Append(",");
-                sb.Append(EscapeString(values[i]));
-            }
-            sb.Append("]");
-            return sb.ToString();
+            if (values == null || values.Length == 0) return "[]";
+            return $"[{string.Join(",", values.Select(EscapeString))}]";
         }
     }
 }

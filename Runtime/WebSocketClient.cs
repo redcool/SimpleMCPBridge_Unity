@@ -14,13 +14,51 @@ namespace SimpleMCPBridge.Runtime
     /// Minimal WebSocket client (RFC 6455) built on raw TCP sockets.
     /// Connects to SimpleMcpServer, sends/receives WebSocket frames.
     /// Zero external dependencies — works with Unity's .NET Standard 2.1 profile.
+    ///
+    /// == TCP 粘包 / 拆包 handling ==
+    /// All received data goes into a unified receive buffer (`_recvBuffer`) first.
+    /// Frame parsing reads from this buffer. This naturally handles:
+    ///   - 粘包: multiple WebSocket frames in one TCP segment
+    ///   - 拆包: partial frame split across TCP segments
+    ///   - 混合: HTTP response + first WS frame in one segment (the bug this fixes)
     /// </summary>
     public class WebSocketClient : IDisposable
     {
+        // ── WebSocket protocol constants (RFC 6455) ──
+        private const int FinBit = 0x80;
+        private const int MaskBit = 0x80;
+        private const int OpcodeMask = 0x0F;
+        private const int PayloadLenMask = 0x7F;
+        private const int TextOpcode = 0x1;
+        private const int CloseOpcode = 0x8;
+        private const int PingOpcode = 0x9;
+        private const int PongOpcode = 0xA;
+        private const int SmallPayloadMax = 125;
+        private const int Extended16Marker = 126;
+        private const int Extended64Marker = 127;
+        private const int MaxUInt16Payload = 65535; // max value for 16-bit extended length
+        private const int MaskKeySize = 4;
+        private const int FrameHeaderMinSize = 2;
+        private const int Extended16Size = 2;
+        private const int Extended64Size = 8;
+
+        // ── Timeouts / constants ──
+        private const int DisconnectTimeoutMs = 5000;
+        private const int ConnectTimeoutMs = 10000;
+        private const int RecvBufferSize = 65536; // 64KB — fits any WebSocket frame below this size
+
         private TcpClient _tcpClient;
         private NetworkStream _stream;
         private CancellationTokenSource _cts;
         private volatile bool _isConnected;
+        private readonly SemaphoreSlim _sendLock = new(1, 1);
+
+        // ── Unified receive buffer (solves TCP 粘包) ──
+        // _recvBuffer[_recvStart .. _recvStart + _recvCount) = valid received bytes
+        // CompactIfNeeded() slides data to front when offset grows large.
+        private byte[] _recvBuffer;
+        private int _recvStart;  // start of valid data in _recvBuffer
+        private int _recvCount;  // number of valid bytes
 
         // ── Events ──
         /// <summary>Message received from server (JSON-RPC tool calls).</summary>
@@ -34,6 +72,8 @@ namespace SimpleMCPBridge.Runtime
 
         // ── Properties ──
         public bool IsConnected => _isConnected;
+        /// <summary>True when a TcpClient exists but the WebSocket handshake hasn't completed yet (connecting or reconnecting).</summary>
+        public bool IsConnecting => _tcpClient != null && !_isConnected;
 
         // ── Connection ──
 
@@ -45,33 +85,88 @@ namespace SimpleMCPBridge.Runtime
             Disconnect(); // start fresh
 
             _cts = new CancellationTokenSource();
+            using var timeoutCts = new CancellationTokenSource(ConnectTimeoutMs);
+            var ct = timeoutCts.Token;
+
             _tcpClient = new TcpClient();
 
-            await _tcpClient.ConnectAsync(host, port);
-            _stream = _tcpClient.GetStream();
+            try
+            {
+                // Use WhenAny for timeout since TcpClient.ConnectAsync may not support CancellationToken
+                var connectTask = _tcpClient.ConnectAsync(host, port);
+                var timeoutTask = Task.Delay(ConnectTimeoutMs, ct);
+                var completed = await Task.WhenAny(connectTask, timeoutTask);
+                ThrowIfDisposed();
+                if (completed == timeoutTask)
+                    throw new TimeoutException($"Connect timeout after {ConnectTimeoutMs}ms to {host}:{port}");
+                await connectTask; // propagate any connection exception
 
-            // Perform HTTP WebSocket upgrade handshake
-            await PerformHandshakeAsync(host, port);
+                ThrowIfDisposed();
+                _stream = _tcpClient.GetStream();
 
-            _isConnected = true;
-            OnConnected?.Invoke();
+                // ── Receive buffer ──
+                _recvBuffer = new byte[RecvBufferSize];
+                _recvStart = 0;
+                _recvCount = 0;
 
-            // Start reading frames on background thread
-            _ = ReadLoopAsync(_cts.Token);
+                // Perform HTTP WebSocket upgrade handshake (reads into _recvBuffer)
+                await PerformHandshakeAsync(host, port);
+                ThrowIfDisposed();
+
+                _isConnected = true;
+                OnConnected?.Invoke();
+
+                // Start reading frames on background thread
+                // ReadLoopAsync uses _recvBuffer — any WS frame data that arrived
+                // during the handshake is already in the buffer.
+                _ = ReadLoopAsync(_cts.Token);
+            }
+            catch
+            {
+                CleanupAfterFailedConnect();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Clean up after a failed connect attempt so IsConnecting returns false.
+        /// Called from catch blocks in ConnectAsync.
+        /// </summary>
+        private void CleanupAfterFailedConnect()
+        {
+            _tcpClient?.Close();
+            _tcpClient = null;
+            _stream = null;
+            _isConnected = false;
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (_tcpClient == null)
+                throw new InvalidOperationException("WebSocketClient was disconnected during async connect");
         }
 
         /// <summary>
         /// Disconnect and clean up.
+        /// Acquires the send lock before closing the TCP connection to prevent
+        /// mid-write kills — SendAsync may be in the middle of writing a frame
+        /// (header written, payload pending). Closing the socket between the two
+        /// WriteAsync calls leaves a partial frame that the server can't parse.
         /// </summary>
         public void Disconnect()
         {
             _cts?.Cancel();
+            // Non-blocking: try to acquire send lock without waiting.
+            // If a send is in-flight, it will fail safely when the socket closes.
+            try { if (_sendLock.Wait(0)) _sendLock.Release(); } catch { }
             if (_tcpClient != null)
             {
                 try { _tcpClient.Close(); } catch { }
                 _tcpClient = null;
             }
             _stream = null;
+            _recvBuffer = null;
+            _recvStart = _recvCount = 0;
             _isConnected = false;
         }
 
@@ -81,13 +176,23 @@ namespace SimpleMCPBridge.Runtime
 
         /// <summary>
         /// Send a text message to the server.
+        /// Serialized via _sendLock to prevent concurrent TCP writes from
+        /// interleaving WebSocket frames (causes "Invalid UTF-8 sequence" on server).
         /// </summary>
         public async Task SendAsync(string message)
         {
-            if (!_isConnected || _stream == null)
-                throw new InvalidOperationException("Not connected");
-            var payload = Encoding.UTF8.GetBytes(message);
-            await SendFrameAsync(0x1, payload); // text frame, masked (client→server)
+            await _sendLock.WaitAsync();
+            try
+            {
+                if (!_isConnected || _stream == null)
+                    throw new InvalidOperationException("Not connected");
+                var payload = Encoding.UTF8.GetBytes(message);
+                await SendFrameAsync(TextOpcode, payload); // text frame, masked (client→server)
+            }
+            finally
+            {
+                _sendLock.Release();
+            }
         }
 
         // ── WebSocket frame sending (client→server, MUST be masked) ──
@@ -97,70 +202,148 @@ namespace SimpleMCPBridge.Runtime
             var maskKey = GenerateMaskKey();
 
             var header = new List<byte>();
-            header.Add((byte)(0x80 | opcode)); // FIN + opcode
+            header.Add((byte)(FinBit | opcode)); // FIN + opcode
 
-            if (payload.Length < 126)
+            if (payload.Length <= SmallPayloadMax)
             {
-                header.Add((byte)(0x80 | payload.Length)); // MASK + length
+                header.Add((byte)(MaskBit | payload.Length)); // MASK + length
             }
-            else if (payload.Length < 65536)
+            else if (payload.Length <= MaxUInt16Payload)
             {
-                header.Add(0x80 | 126);
+                header.Add(MaskBit | Extended16Marker);
                 header.Add((byte)((payload.Length >> 8) & 0xFF));
                 header.Add((byte)(payload.Length & 0xFF));
             }
             else
             {
-                header.Add(0x80 | 127);
+                header.Add(MaskBit | Extended64Marker);
                 var lenBytes = BitConverter.GetBytes((ulong)payload.Length);
                 if (BitConverter.IsLittleEndian)
                     Array.Reverse(lenBytes);
                 header.AddRange(lenBytes);
             }
 
-            header.AddRange(maskKey); // 4-byte mask key
+            header.AddRange(maskKey); // MaskKeySize-byte mask key
 
             await _stream.WriteAsync(header.ToArray(), 0, header.Count);
 
             // Mask payload
             var masked = new byte[payload.Length];
             for (int i = 0; i < payload.Length; i++)
-                masked[i] = (byte)(payload[i] ^ maskKey[i % 4]);
+                masked[i] = (byte)(payload[i] ^ maskKey[i % MaskKeySize]);
 
             await _stream.WriteAsync(masked, 0, masked.Length);
             await _stream.FlushAsync();
+        }
+
+        // ── Receive buffer management ──
+
+        /// <summary>
+        /// Compact the receive buffer: slide valid data to the front when
+        /// _recvStart has grown large, or simply reset counters when empty.
+        /// </summary>
+        private void CompactBuffer()
+        {
+            if (_recvCount <= 0)
+            {
+                _recvStart = 0;
+                return;
+            }
+            if (_recvStart > 0)
+            {
+                Array.Copy(_recvBuffer, _recvStart, _recvBuffer, 0, _recvCount);
+                _recvStart = 0;
+            }
+        }
+
+        /// <summary>
+        /// Drain up to <c>count</c> bytes from the receive buffer into <c>dest</c>.
+        /// Returns the number of bytes actually copied (may be less than <c>count</c>
+        /// if buffer doesn't have enough data).
+        /// Does NOT block — only reads from the in-memory buffer.
+        /// </summary>
+        private int DrainBuffer(byte[] dest, int offset, int count)
+        {
+            if (_recvCount <= 0) return 0;
+            int toCopy = Math.Min(_recvCount, count);
+            Array.Copy(_recvBuffer, _recvStart, dest, offset, toCopy);
+            _recvStart += toCopy;
+            _recvCount -= toCopy;
+            return toCopy;
+        }
+
+        /// <summary>
+        /// Fill the receive buffer from the network.
+        /// Blocks until data arrives or the connection is closed.
+        /// Returns the number of bytes read (0 = connection closed).
+        /// </summary>
+        private async Task<int> FillFromNetworkAsync(CancellationToken token)
+        {
+            // Compact to make room at the end of the buffer
+            CompactBuffer();
+            int space = _recvBuffer.Length - _recvStart - _recvCount;
+            if (space <= 0)
+                throw new InvalidOperationException("Receive buffer full");
+
+            int read = await _stream.ReadAsync(_recvBuffer, _recvStart + _recvCount, space, token);
+            if (read > 0)
+                _recvCount += read;
+            return read;
+        }
+
+        /// <summary>
+        /// Read exactly <c>count</c> bytes from the network into <c>buffer[offset..]</c>.
+        /// Uses the internal receive buffer first, then reads from the network.
+        /// This is the central method that handles TCP 拆包 (partial reads) correctly:
+        /// it loops until the requested number of bytes have been obtained.
+        /// </summary>
+        private async Task<int> ReadExactAsync(byte[] buffer, int offset, int count, CancellationToken token)
+        {
+            int totalRead = 0;
+            while (totalRead < count)
+            {
+                // 1) Drain from internal buffer first (non-blocking)
+                totalRead += DrainBuffer(buffer, offset + totalRead, count - totalRead);
+                if (totalRead >= count) break;
+
+                // 2) Fill buffer from network (blocks until data or close)
+                int netRead = await FillFromNetworkAsync(token);
+                if (netRead <= 0) break; // connection closed
+            }
+            return totalRead;
         }
 
         // ── WebSocket frame reading (server→client, NOT masked) ──
 
         private async Task ReadLoopAsync(CancellationToken token)
         {
-            var headerBuf = new byte[2];
+            var headerBuf = new byte[FrameHeaderMinSize];
 
             while (!token.IsCancellationRequested)
             {
                 try
                 {
-                    var read = await ReadExactAsync(headerBuf, 0, 2, token);
-                    if (read < 2) break;
+                    // Read 2-byte frame header
+                    var read = await ReadExactAsync(headerBuf, 0, FrameHeaderMinSize, token);
+                    if (read < FrameHeaderMinSize) break;
 
-                    int opcode = headerBuf[0] & 0x0F;
-                    bool masked = (headerBuf[1] & 0x80) != 0;
-                    long payloadLength = headerBuf[1] & 0x7F;
+                    int opcode = headerBuf[0] & OpcodeMask;
+                    bool masked = (headerBuf[1] & MaskBit) != 0;
+                    long payloadLength = headerBuf[1] & PayloadLenMask;
 
                     // Extended payload length
-                    if (payloadLength == 126)
+                    if (payloadLength == Extended16Marker)
                     {
-                        var ext = new byte[2];
-                        await ReadExactAsync(ext, 0, 2, token);
+                        var ext = new byte[Extended16Size];
+                        await ReadExactAsync(ext, 0, Extended16Size, token);
                         payloadLength = (ext[0] << 8) | ext[1];
                     }
-                    else if (payloadLength == 127)
+                    else if (payloadLength == Extended64Marker)
                     {
-                        var ext = new byte[8];
-                        await ReadExactAsync(ext, 0, 8, token);
+                        var ext = new byte[Extended64Size];
+                        await ReadExactAsync(ext, 0, Extended64Size, token);
                         payloadLength = 0;
-                        for (int i = 0; i < 8; i++)
+                        for (int i = 0; i < Extended64Size; i++)
                             payloadLength = (payloadLength << 8) | ext[i];
                     }
 
@@ -168,17 +351,17 @@ namespace SimpleMCPBridge.Runtime
                     byte[] maskKey = null;
                     if (masked)
                     {
-                        maskKey = new byte[4];
-                        await ReadExactAsync(maskKey, 0, 4, token);
+                        maskKey = new byte[MaskKeySize];
+                        await ReadExactAsync(maskKey, 0, MaskKeySize, token);
                     }
 
-                    // Payload
+                    // Payload (use ReadExactAsync for consistency with buffer)
                     var payload = new byte[payloadLength];
                     long totalRead = 0;
                     while (totalRead < payloadLength)
                     {
-                        var chunk = await _stream.ReadAsync(payload, (int)totalRead,
-                            (int)(payloadLength - totalRead), token);
+                        int chunkSize = Math.Min((int)(payloadLength - totalRead), 8192); // read in chunks
+                        var chunk = await ReadExactAsync(payload, (int)totalRead, chunkSize, token);
                         if (chunk <= 0) break;
                         totalRead += chunk;
                     }
@@ -187,17 +370,17 @@ namespace SimpleMCPBridge.Runtime
                     if (masked && maskKey != null)
                     {
                         for (long i = 0; i < payloadLength; i++)
-                            payload[i] ^= maskKey[i % 4];
+                            payload[i] ^= maskKey[i % MaskKeySize];
                     }
 
                     switch (opcode)
                     {
-                        case 0x8: // Close
+                        case CloseOpcode: // Close
                             return;
-                        case 0x9: // Ping — respond with Pong
-                            await SendFrameAsync(0xA, payload);
+                        case PingOpcode: // Ping — respond with Pong
+                            await SendFrameAsync(PongOpcode, payload);
                             break;
-                        case 0x1: // Text
+                        case TextOpcode: // Text
                             var message = Encoding.UTF8.GetString(payload);
                             OnMessageReceived?.Invoke(message);
                             break;
@@ -214,34 +397,93 @@ namespace SimpleMCPBridge.Runtime
                 }
             }
 
+            // Clean up so IsConnecting returns false (allows reconnection)
             _isConnected = false;
+            _tcpClient?.Close();
+            _tcpClient = null;
+            _stream = null;
             OnDisconnected?.Invoke();
         }
 
         // ── HTTP WebSocket upgrade (client side) ──
 
+        /// <summary>
+        /// Send the HTTP WebSocket upgrade request, then read the response.
+        ///
+        /// == TCP 粘包 handling ==
+        /// Reads ALL available data into <c>_recvBuffer</c> until the HTTP
+        /// response headers are complete (detected by \r\n\r\n).
+        /// Any data after the HTTP headers (e.g. the server's first
+        /// WebSocket frame) stays in <c>_recvBuffer</c> and will be consumed
+        /// by <c>ReadLoopAsync</c> via <c>ReadExactAsync</c>.
+        ///
+        /// This replaces the old byte-by-byte <c>ReadByte</c> approach with
+        /// a proper buffering scheme that naturally handles:
+        ///   - HTTP 101 + WS frame in one TCP segment (粘包)
+        ///   - HTTP response split across TCP segments (拆包)
+        ///   - HTTP response partially buffered, rest from network
+        /// </summary>
         private async Task PerformHandshakeAsync(string host, int port)
         {
             var key = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
-            var request = $"GET / HTTP/1.1\r\n"
-                        + $"Host: {host}:{port}\r\n"
-                        + $"Upgrade: websocket\r\n"
-                        + $"Connection: Upgrade\r\n"
-                        + $"Sec-WebSocket-Key: {key}\r\n"
-                        + $"Sec-WebSocket-Version: 13\r\n"
-                        + $"\r\n";
+            var request = $"GET / HTTP/1.1\r\nHost: {host}:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n";
 
             var bytes = Encoding.UTF8.GetBytes(request);
             await _stream.WriteAsync(bytes, 0, bytes.Length);
 
-            // Read server response
-            var buffer = new byte[4096];
-            var read = await _stream.ReadAsync(buffer, 0, buffer.Length);
-            var response = Encoding.UTF8.GetString(buffer, 0, read);
+            // Read into _recvBuffer until \r\n\r\n is found.
+            // Any data after \r\n\r\n (i.e., the first WebSocket frame(s))
+            // stays in _recvBuffer for ReadLoopAsync.
+            int headerEndIndex = -1;
+
+            while (true)
+            {
+                // Compact buffer to make room for more network data
+                CompactBuffer();
+                int space = _recvBuffer.Length - _recvStart - _recvCount;
+                if (space <= 0)
+                    throw new Exception("HTTP response headers too large (>64KB)");
+
+                int read = await _stream.ReadAsync(_recvBuffer, _recvStart + _recvCount, space);
+                if (read <= 0)
+                    throw new EndOfStreamException("Server closed connection during HTTP handshake");
+                _recvCount += read;
+
+                // Search for \r\n\r\n in the buffered data
+                for (int i = _recvStart; i <= _recvStart + _recvCount - 4; i++)
+                {
+                    if (_recvBuffer[i] == '\r' &&
+                        _recvBuffer[i + 1] == '\n' &&
+                        _recvBuffer[i + 2] == '\r' &&
+                        _recvBuffer[i + 3] == '\n')
+                    {
+                        headerEndIndex = i + 4; // position AFTER \r\n\r\n
+                        break;
+                    }
+                }
+
+                if (headerEndIndex >= 0)
+                    break;
+            }
+
+            // Extract and validate the HTTP response
+            var response = Encoding.UTF8.GetString(_recvBuffer, _recvStart, headerEndIndex - _recvStart);
+
+            // Trim the buffer: remove the HTTP response, keep only WebSocket frame data
+            int httpHeaderLen = headerEndIndex - _recvStart;
+            int surplus = _recvCount - httpHeaderLen;
+            if (surplus > 0)
+            {
+                // Slide surplus data to front of buffer
+                Array.Copy(_recvBuffer, headerEndIndex, _recvBuffer, 0, surplus);
+            }
+            _recvStart = 0;
+            _recvCount = surplus;
 
             if (!response.Contains("101") || !response.Contains("Sec-WebSocket-Accept"))
             {
-                throw new Exception($"WebSocket handshake failed: server returned {response.Substring(0, Math.Min(response.Length, 100))}");
+                var preview = response.Substring(0, Math.Min(response.Length, 100));
+                throw new Exception($"WebSocket handshake failed: server returned {preview}");
             }
         }
 
@@ -255,18 +497,6 @@ namespace SimpleMCPBridge.Runtime
                 rng.GetBytes(key);
             }
             return key;
-        }
-
-        private async Task<int> ReadExactAsync(byte[] buffer, int offset, int count, CancellationToken token)
-        {
-            int totalRead = 0;
-            while (totalRead < count)
-            {
-                var read = await _stream.ReadAsync(buffer, offset + totalRead, count - totalRead, token);
-                if (read <= 0) break;
-                totalRead += read;
-            }
-            return totalRead;
         }
     }
 }

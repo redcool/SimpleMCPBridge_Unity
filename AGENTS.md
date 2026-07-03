@@ -54,7 +54,7 @@ server keeps only the most recent one.
 - **Server stderr:** `SimpleMcpServer/server.err`
 - **Unity Editor log:** `$env:LOCALAPPDATA\Unity\Editor\Editor.log`
 
-## 6 Tools
+## Tools (20)
 
 | Tool | What it does |
 |------|-------------|
@@ -64,29 +64,41 @@ server keeps only the most recent one.
 | `scene.delete_object` | Destroy by instanceId |
 | `scene.set_transform` | Set position/rotation/scale by instanceId |
 | `scene.set_component_property` | Set field/property on a component (supports Vector3, Color, enum, etc.) |
+| `scene.get_components` | List all components on a GameObject (type name, fullType, enabled) |
+| `scene.get_component_properties` | Get all serializable properties + current values of a component |
+| `scene.set_active` | Enable/disable a GameObject |
+| `scene.duplicate_object` | Duplicate a GameObject |
+| `scene.rename` | Rename a GameObject |
+| `scene.set_parent` | Set parent (omit parentId or 0 to unparent to root) |
+| `scene.add_component` | Add component by type name (e.g. Rigidbody) |
+| `scene.instantiate_prefab` | Instantiate a prefab from project Assets by asset path (Editor only) |
+| `scene.find_assets` 🚫 | **DO NOT USE.** Use VS Code global search `*.meta` instead — much faster |
+| `scene.set_material` ⚠ | Set material color/texture on Renderer. For asset-level material edits, prefer editing `.meta` GUIDs via filesystem |
+| `scene.enter_play_mode` | Enter Play Mode (Editor only) |
+| `scene.exit_play_mode` | Exit Play Mode (Editor only) |
+| `scene.pause_play_mode` | Pause/resume Play Mode — `paused: true/false` (Editor only) |
+| `editor.request_compile` | Trigger Unity script recompilation (after editing C# via filesystem) (Editor only) |
 
-Tools are discovered at runtime via `[MCPTool]` attribute on methods with
-signature `(string paramsJson) -> string`. Register new tools in
-`MessageRouter.cs` constructor: `_registry.Register(new MyHandler());`.
+Tools are auto-discovered via `AutoRegisterAll()` — just create a class with
+`[MCPTool]` methods and it's picked up automatically.
 
-## MCP SDK v1.x Limitation
+## Protocol: Tool Registration (request_tools)
 
-`registerTool()` throws after `server.connect()`. Don't use it — use
-`server.setRequestHandler(ListToolsRequestSchema, ...)` and
-`server.setRequestHandler(CallToolRequestSchema, ...)` with a manual
-`registeredTools` array that gets updated when the bridge sends
-`register_tools`. See `src/index.ts` for the pattern.
+Registration is server-driven, not bridge-push:
 
-## Known Bug
-
-**BridgeId is lost on retry reconnect.** In `MCPBridge.cs` line 179, the
-retry loop sends `register_tools` without `bridgeId`:
-```csharp
-var registerMsg = $"{{\"type\":\"register_tools\",\"tools\":{toolsJson}}}";
 ```
-Compare to the initial connection (line 91) which includes
-`,\"bridgeId\":\"{BridgeId}\"`. Server shows `(unknown)` for bridge ID on
-retry connections. Fix: add `bridgeId` to the retry path's register message.
+Server → Bridge: {"type":"request_tools"}
+Bridge → Server: {"type":"register_tools","tools":[...],"bridgeId":"..."}
+```
+
+- Server sends `request_tools` right after WebSocket handshake
+- Bridge responds with `register_tools` in `HandleMessage()`
+- If no response within 8s, server re-requests (up to 3 attempts)
+- Both initial connect and retry reconnect use the same path
+- The `handleMessage` method in `MCPBridge.cs` checks for `request_tools`
+  before routing to JSON-RPC dispatch
+
+This avoids the race condition where bridge connects but tools aren't registered.
 
 ## BridgeId per Window Open
 
