@@ -72,10 +72,11 @@ namespace SimpleMCPBridge.Runtime.Handlers
             // Execute pointer events on the topmost hit (first result = topmost in UI)
             var target = results[0].gameObject;
 
-            // Full click sequence: Down (hierarchy bubble) → Up → Click
+            // Full click sequence: Down → Up → Click (all bubble up via ExecuteHierarchy
+            // so parent objects like Button receive the events even when the Raycast hits a child Text).
             ExecuteEvents.ExecuteHierarchy(target, pointerData, ExecuteEvents.pointerDownHandler);
-            ExecuteEvents.Execute(target, pointerData, ExecuteEvents.pointerUpHandler);
-            ExecuteEvents.Execute(target, pointerData, ExecuteEvents.pointerClickHandler);
+            ExecuteEvents.ExecuteHierarchy(target, pointerData, ExecuteEvents.pointerUpHandler);
+            ExecuteEvents.ExecuteHierarchy(target, pointerData, ExecuteEvents.pointerClickHandler);
 
             return JsonHelper.BuildJsonObject(
                 ("success", "true"),
