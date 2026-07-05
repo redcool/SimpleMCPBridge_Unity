@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Sockets;
@@ -89,7 +89,6 @@ namespace SimpleMCPBridge.Runtime
             var ct = timeoutCts.Token;
 
             _tcpClient = new TcpClient();
-
             try
             {
                 // Use WhenAny for timeout since TcpClient.ConnectAsync may not support CancellationToken
@@ -103,7 +102,6 @@ namespace SimpleMCPBridge.Runtime
 
                 ThrowIfDisposed();
                 _stream = _tcpClient.GetStream();
-
                 // ── Receive buffer ──
                 _recvBuffer = new byte[RecvBufferSize];
                 _recvStart = 0;
@@ -111,6 +109,7 @@ namespace SimpleMCPBridge.Runtime
 
                 // Perform HTTP WebSocket upgrade handshake (reads into _recvBuffer)
                 await PerformHandshakeAsync(host, port);
+
                 ThrowIfDisposed();
 
                 _isConnected = true;
@@ -396,7 +395,6 @@ namespace SimpleMCPBridge.Runtime
                     break;
                 }
             }
-
             // Clean up so IsConnecting returns false (allows reconnection)
             _isConnected = false;
             _tcpClient?.Close();
@@ -427,7 +425,6 @@ namespace SimpleMCPBridge.Runtime
         {
             var key = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
             var request = $"GET / HTTP/1.1\r\nHost: {host}:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n";
-
             var bytes = Encoding.UTF8.GetBytes(request);
             await _stream.WriteAsync(bytes, 0, bytes.Length);
 
@@ -443,7 +440,6 @@ namespace SimpleMCPBridge.Runtime
                 int space = _recvBuffer.Length - _recvStart - _recvCount;
                 if (space <= 0)
                     throw new Exception("HTTP response headers too large (>64KB)");
-
                 int read = await _stream.ReadAsync(_recvBuffer, _recvStart + _recvCount, space);
                 if (read <= 0)
                     throw new EndOfStreamException("Server closed connection during HTTP handshake");

@@ -47,6 +47,8 @@ namespace SimpleMCPBridge.Runtime
         public const string GET_PLAY_MODE = "scene.get_play_mode";
 
         // ── 资源工具 ──
+        /// <summary>刷新资产数据库，导入新文件或检测文件变化。</summary>
+        public const string REFRESH_ASSETS = "asset.refresh";
         /// <summary>从项目资源加载预制体并实例化到场景。</summary>
         public const string INSTANTIATE_PREFAB = "scene.instantiate_prefab";
         /// <summary>按名称和类型搜索项目资源（AssetHandler）。</summary>
@@ -61,5 +63,9 @@ namespace SimpleMCPBridge.Runtime
         public const string REQUEST_COMPILE = "editor.request_compile";
         /// <summary>通过菜单路径打开 Unity Editor 窗口。</summary>
         public const string OPEN_WINDOW = "editor.open_window";
+
+        // ── 输入模拟工具 ──
+        /// <summary>在屏幕指定位置模拟点击（通过 EventSystem 完整事件管线）。</summary>
+        public const string CLICK_SCREEN = "input.click_screen";
     }
 }

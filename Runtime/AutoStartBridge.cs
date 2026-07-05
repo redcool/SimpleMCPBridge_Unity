@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -118,6 +118,14 @@ namespace SimpleMCPBridge.Runtime
             };
             if (status == null) return;
             _bridge?.SendIfConnected($"{{\"type\":\"playmode\",\"status\":\"{status}\"}}");
+
+            // Disconnect bridge BEFORE domain reload so the old WebSocket
+            // connection is properly closed and doesn't leak thread pool threads.
+            if (state == PlayModeStateChange.ExitingPlayMode ||
+                state == PlayModeStateChange.ExitingEditMode)
+            {
+                _bridge?.Disconnect();
+            }
         }
 #endif
 

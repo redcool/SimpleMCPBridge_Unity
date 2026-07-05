@@ -1,0 +1,207 @@
+using System;
+using System.IO;
+using System.Net.WebSockets;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using UnityEngine;
+
+namespace SimpleMCPBridge.Runtime
+{
+    /// <summary>
+    /// WebSocket client built on System.Net.WebSockets.ClientWebSocket (NuGet/framework built-in).
+    /// Drop-in alternative to WebSocketClient with identical event API.
+    /// 
+    /// Advantages over the custom WebSocketClient (raw TCP + manual RFC 6455):
+    ///   - Battle-tested by Microsoft, handles all edge cases (permessage-deflate, close handshake, etc.)
+    ///   - Proper close handshake on disconnect
+    ///   - Built-in fragmentation handling
+    ///   - Better for production/engineering use
+    /// 
+    /// Trade-offs:
+    ///   - Requires System.Net.WebSockets.ClientWebSocket (available via Unity NuGet or netstandard2.1)
+    ///   - Slightly more allocation overhead per receive
+    ///   - You can't control frame-level details
+    /// </summary>
+    public class NetWebSocketClient : IDisposable
+    {
+        // ── Constants ──
+        private const int ConnectTimeoutMs = 10000;
+        private const int DisconnectTimeoutMs = 5000;
+        private const int ReceiveBufferSize = 8192; // per ReadAsync call; fragments accumulate via StringBuilder
+
+        private ClientWebSocket _ws;
+        private CancellationTokenSource _cts;
+        private volatile bool _isConnected;
+        private readonly SemaphoreSlim _sendLock = new(1, 1);
+
+        // ── Events (same signature as WebSocketClient) ──
+        /// <summary>Message received from server (JSON-RPC tool calls).</summary>
+        public event Action<string> OnMessageReceived;
+        /// <summary>Connected to SimpleMcpServer.</summary>
+        public event Action OnConnected;
+        /// <summary>Disconnected from SimpleMcpServer.</summary>
+        public event Action OnDisconnected;
+        /// <summary>An error occurred.</summary>
+        public event Action<string> OnError;
+
+        // ── Properties ──
+        /// <summary>True when the WebSocket is in the Open state.</summary>
+        public bool IsConnected => _isConnected;
+        /// <summary>True when a ClientWebSocket exists but hasn't finished connecting.</summary>
+        public bool IsConnecting => _ws != null && !_isConnected;
+
+        // ── Connection ──
+
+        /// <summary>
+        /// Connect to SimpleMcpServer via WebSocket at host:port.
+        /// </summary>
+        public async Task ConnectAsync(string host, int port)
+        {
+            Disconnect(); // start fresh
+
+            _cts = new CancellationTokenSource();
+            var uri = new Uri($"ws://{host}:{port}");
+            _ws = new ClientWebSocket();
+
+            using var timeoutCts = new CancellationTokenSource(ConnectTimeoutMs);
+            try
+            {
+                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, timeoutCts.Token);
+                await _ws.ConnectAsync(uri, linkedCts.Token);
+
+                _isConnected = true;
+                OnConnected?.Invoke();
+
+                // Start receiving frames on background thread
+                _ = ReceiveLoopAsync(_cts.Token);
+            }
+            catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+            {
+                CleanupAfterFailedConnect();
+                throw new TimeoutException($"Connect timeout after {ConnectTimeoutMs}ms to {host}:{port}");
+            }
+            catch
+            {
+                CleanupAfterFailedConnect();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Send a text message to the server.
+        /// </summary>
+        public async Task SendAsync(string message)
+        {
+            await _sendLock.WaitAsync();
+            try
+            {
+                if (_ws == null || _ws.State != WebSocketState.Open)
+                    throw new InvalidOperationException("Not connected");
+
+                var bytes = Encoding.UTF8.GetBytes(message);
+                await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cts.Token);
+            }
+            finally
+            {
+                _sendLock.Release();
+            }
+        }
+
+        // ── Disconnect / Cleanup ──
+
+        /// <summary>
+        /// Disconnect from the server.
+        /// Performs a clean WebSocket close handshake before disposing.
+        /// </summary>
+        public void Disconnect()
+        {
+            _cts?.Cancel();
+
+            // Non-blocking send-lock drain: if a send is in-flight, let it finish on its own
+            try { if (_sendLock.Wait(0)) _sendLock.Release(); } catch { }
+
+            if (_ws != null)
+            {
+                // Try clean close handshake (with timeout to avoid hang)
+                try
+                {
+                    if (_ws.State == WebSocketState.Open || _ws.State == WebSocketState.CloseReceived)
+                    {
+                        var closeCts = new CancellationTokenSource(DisconnectTimeoutMs);
+                        _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Disconnect", closeCts.Token)
+                           .ConfigureAwait(false).GetAwaiter().GetResult();
+                    }
+                }
+                catch { }
+
+                _ws.Dispose();
+                _ws = null;
+            }
+
+            _isConnected = false;
+        }
+
+        public void Dispose() => Disconnect();
+
+        // ── Receive loop ──
+
+        /// <summary>
+        /// Continuous receive loop. Runs on a background thread.
+        /// Accumulates fragmented messages and fires OnMessageReceived for complete text messages.
+        /// </summary>
+        private async Task ReceiveLoopAsync(CancellationToken token)
+        {
+            var buffer = new byte[ReceiveBufferSize];
+
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    var result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer), token);
+
+                    if (result.MessageType == WebSocketMessageType.Close)
+                        break;
+
+                    if (result.MessageType == WebSocketMessageType.Text)
+                    {
+                        var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+
+                        // Accumulate fragmented frames
+                        while (!result.EndOfMessage)
+                        {
+                            result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer), token);
+                            message += Encoding.UTF8.GetString(buffer, 0, result.Count);
+                        }
+
+                        OnMessageReceived?.Invoke(message);
+                    }
+                    // Binary messages are ignored
+                }
+                catch (OperationCanceledException) { break; }
+                catch (WebSocketException) { break; }
+                catch (Exception ex)
+                {
+                    OnError?.Invoke(ex.Message);
+                    break;
+                }
+            }
+
+            // Connection lost — notify
+            _isConnected = false;
+            OnDisconnected?.Invoke();
+        }
+
+        // ── Helpers ──
+
+        private void CleanupAfterFailedConnect()
+        {
+            if (_ws != null)
+            {
+                _ws.Dispose();
+                _ws = null;
+            }
+            _isConnected = false;
+        }
+    }
+}

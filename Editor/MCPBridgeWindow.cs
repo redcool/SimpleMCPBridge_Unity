@@ -1,7 +1,9 @@
 ﻿#if UNITY_EDITOR
 using SimpleMCPBridge.Runtime;
+using System;
 using System.IO;
 using UnityEditor;
+using UnityEditor.Compilation;
 using UnityEngine;
 
 namespace SimpleMCPBridge.Editor
@@ -54,11 +56,38 @@ namespace SimpleMCPBridge.Editor
             EditorApplication.update += StaticUpdate;
             EditorApplication.quitting -= OnEditorQuit;
             EditorApplication.quitting += OnEditorQuit;
+
+            AppDomain.CurrentDomain.DomainUnload += CurrentDomain_DomainUnload;
+            EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
+            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
         }
+
+        /// <summary>
+        /// Disconnect BEFORE domain reload so the old WebSocket/ReadLoopAsync
+        /// is properly closed (not relying on DomainUnload which fires when
+        /// the AppDomain is already halfway torn down and socket.Close() may
+        /// silently fail).
+        /// </summary>
+        private static void OnPlayModeStateChanged(PlayModeStateChange state)
+        {
+            if (state == PlayModeStateChange.ExitingPlayMode ||
+                state == PlayModeStateChange.ExitingEditMode)
+            {
+                MCPBridge.Default?.Disconnect();
+            }
+        }
+
+        private static void CurrentDomain_DomainUnload(object sender, EventArgs e)
+        {
+            MCPBridge.Default?.Disconnect();
+        }
+
 
         private static void OnEditorQuit()
         {
             EditorApplication.update -= StaticUpdate;
+            EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
+            AppDomain.CurrentDomain.DomainUnload -= CurrentDomain_DomainUnload;
         }
 
         private static void StaticUpdate()

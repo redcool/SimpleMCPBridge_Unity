@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.IO;
 using System.Threading.Tasks;
@@ -29,7 +29,7 @@ namespace SimpleMCPBridge.Runtime
         private const int ResponseLogLength = 100;
 
         private string _logPath;
-        private volatile WebSocketClient _client;
+        private WebSocketClient _client;
         private MessageRouter _router;
         private readonly ConcurrentQueue<Action> _mainThreadQueue = new();
         private int _tickCount;
@@ -118,24 +118,43 @@ namespace SimpleMCPBridge.Runtime
             {
                 Log($"MSG QUEUED: {message.Trim().Substring(0, Math.Min(message.Length, LogPreviewLength))}");
                 _mainThreadQueue.Enqueue(() => HandleMessage(message));
+#if UNITY_EDITOR
+                // Wake up Unity's main loop when a message is queued.
+                // Without this, when the Editor window is unfocused, EditorApplication.update
+                // may not fire frequently enough (or at all), causing the queue to never drain
+                // and tool calls to time out.
+                UnityEditor.EditorApplication.QueuePlayerLoopUpdate();
+#endif
             };
 
             _client.OnConnected += () =>
             {
-                Log("Connected to server");
-                Debug.Log($"[SimpleMCPBridge] Connected to SimpleMcpServer at ws://{Host}:{Port}");
-                OnConnectedSuccess?.Invoke();
+                _mainThreadQueue.Enqueue(() =>
+                {
+                    Log("Connected to server");
+                    Debug.Log($"[SimpleMCPBridge] Connected to SimpleMcpServer at ws://{Host}:{Port}");
+                    OnConnectedSuccess?.Invoke();
+                });
+#if UNITY_EDITOR
+                UnityEditor.EditorApplication.QueuePlayerLoopUpdate();
+#endif
             };
 
             _client.OnDisconnected += () =>
             {
-                Log("Disconnected from server");
-                Debug.LogWarning($"[SimpleMCPBridge] Disconnected from SimpleMcpServer");
+                _mainThreadQueue.Enqueue(() =>
+                {
+                    Log("Disconnected from server");
+                    Debug.LogWarning($"[SimpleMCPBridge] Disconnected from SimpleMcpServer");
+                });
             };
 
             _client.OnError += (err) =>
             {
-                Log($"Client error: {err}");
+                _mainThreadQueue.Enqueue(() =>
+                {
+                    Log($"Client error: {err}");
+                });
             };
 
             _ = ConnectAsync(host, port);
@@ -211,7 +230,6 @@ namespace SimpleMCPBridge.Runtime
             try
             {
                 await client.ConnectAsync(host, port);
-                Log($"Connected to ws://{host}:{port}");
             }
             catch (Exception ex)
             {
@@ -295,6 +313,7 @@ namespace SimpleMCPBridge.Runtime
             var response = _router.HandleMessage(rawMessage);
             if (response != null)
             {
+                Debug.Log($"  Response: {response.Substring(0, Math.Min(response.Length, ResponseLogLength))}...");
                 Log($"  Response: {response.Substring(0, Math.Min(response.Length, ResponseLogLength))}...");
                 var client = _client;
                 if (client != null && client.IsConnected)

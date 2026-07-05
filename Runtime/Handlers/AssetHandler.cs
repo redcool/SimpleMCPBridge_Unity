@@ -19,6 +19,31 @@ namespace SimpleMCPBridge.Runtime.Handlers
     /// </summary>
     public class AssetHandler
     {
+        /// <summary>
+        /// Triggers AssetDatabase.Refresh and returns immediately.
+        /// If new scripts are imported, a domain reload will occur
+        /// and the MCP connection will drop — this is expected.
+        /// The client should wait for the bridge to reconnect to
+        /// confirm the refresh completed successfully.
+        /// </summary>
+        [MCPTool(MCPMethodConst.REFRESH_ASSETS, "Refresh Unity's asset database to import new files or detect changes. " +
+            "If new scripts are imported, a domain reload will occur and the MCP connection will drop. " +
+            "The client should poll /health until bridgeConnected=true to confirm completion.")]
+        public string RefreshAssets(string paramsJson)
+        {
+            // Parse empty params (but accept any input)
+            _ = ParseJsonObject(paramsJson ?? "{}");
+
+            // Trigger asset refresh — this may cause a domain reload if new scripts are detected
+            AssetDatabase.Refresh();
+
+            // Return success — but if a domain reload occurs, this response won't reach the server
+            return JsonHelper.BuildJsonObject(
+                ("success", "true"),
+                ("message", JsonHelper.EscapeString("Asset refresh triggered. If new scripts were imported, expect a domain reload — poll /health for bridge reconnection."))
+            );
+        }
+
         [MCPTool(MCPMethodConst.FIND_ASSETS, "Search project Assets by name and/or type. " +
             "Examples: nameContains='Player', typeFilter='Prefab', or both. " +
             "Returns array of {path, name, type, guid}.")]
