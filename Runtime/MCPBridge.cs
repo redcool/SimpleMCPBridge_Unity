@@ -29,7 +29,7 @@ namespace SimpleMCPBridge.Runtime
         private const int ResponseLogLength = 100;
 
         private string _logPath;
-        private WebSocketClient _client;
+        private IWebSocketClient _client;
         private MessageRouter _router;
         private readonly ConcurrentQueue<Action> _mainThreadQueue = new();
         private int _tickCount;
@@ -112,7 +112,7 @@ namespace SimpleMCPBridge.Runtime
             _router = new MessageRouter();
             // Disconnect any previous client to avoid leaking connections
             _client?.Disconnect();
-            _client = new WebSocketClient();
+            _client = new NetWebSocketClient();
 
             _client.OnMessageReceived += (message) =>
             {
@@ -244,7 +244,7 @@ namespace SimpleMCPBridge.Runtime
         /// Fire-and-forget send with error logging.
         /// Takes the client reference explicitly to avoid race with external client swap.
         /// </summary>
-        private async Task SendSafeAsync(WebSocketClient client, string message)
+        private async Task SendSafeAsync(IWebSocketClient client, string message)
         {
             try
             {

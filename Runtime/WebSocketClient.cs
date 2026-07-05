@@ -22,7 +22,7 @@ namespace SimpleMCPBridge.Runtime
     ///   - 拆包: partial frame split across TCP segments
     ///   - 混合: HTTP response + first WS frame in one segment (the bug this fixes)
     /// </summary>
-    public class WebSocketClient : IDisposable
+    public class WebSocketClient : IWebSocketClient
     {
         // ── WebSocket protocol constants (RFC 6455) ──
         private const int FinBit = 0x80;

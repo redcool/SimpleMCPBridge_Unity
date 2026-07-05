@@ -23,7 +23,7 @@ namespace SimpleMCPBridge.Runtime
     ///   - Slightly more allocation overhead per receive
     ///   - You can't control frame-level details
     /// </summary>
-    public class NetWebSocketClient : IDisposable
+    public class NetWebSocketClient : IWebSocketClient
     {
         // ── Constants ──
         private const int ConnectTimeoutMs = 10000;
