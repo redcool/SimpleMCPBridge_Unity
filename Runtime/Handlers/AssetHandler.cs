@@ -29,7 +29,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         [MCPTool(MCPMethodConst.REFRESH_ASSETS, "Refresh Unity's asset database to import new files or detect changes. " +
             "If new scripts are imported, a domain reload will occur and the MCP connection will drop. " +
             "The client should poll /health until bridgeConnected=true to confirm completion.")]
-        public string RefreshAssets(string paramsJson)
+        public static string RefreshAssets(string paramsJson)
         {
             // Parse empty params (but accept any input)
             _ = ParseJsonObject(paramsJson ?? "{}");
@@ -47,7 +47,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         [MCPTool(MCPMethodConst.FIND_ASSETS, "Search project Assets by name and/or type. " +
             "Examples: nameContains='Player', typeFilter='Prefab', or both. " +
             "Returns array of {path, name, type, guid}.")]
-        public string FindAssets(string paramsJson)
+        public static string FindAssets(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
             var nameContains = GetString(args, "nameContains");
@@ -93,7 +93,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         [MCPTool(MCPMethodConst.FIND_REFERENCES, "Find all assets that reference a given asset by scanning file content for the target's GUID. " +
             "Reliable but slower than ref: filter — scans all text-based asset files in Assets/. " +
             "Params: assetPath (required). Returns array of referencing assets with their GUIDs.")]
-        public string FindReferences(string paramsJson)
+        public static string FindReferences(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
             var assetPath = GetRequiredString(args, "assetPath");

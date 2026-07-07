@@ -1,4 +1,4 @@
-﻿using SimpleMCPBridge.Runtime;
+using SimpleMCPBridge.Runtime;
 using SimpleMCPBridge.Runtime.Models;
 using System;
 using System.Collections.Generic;
@@ -24,7 +24,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
     public class SceneHandler
     {
         [MCPTool(MCPMethodConst.GET_HIERARCHY, "Get the full scene hierarchy as a tree of objects with position, components, children, and transform path")]
-        public string GetHierarchy(string paramsJson)
+        public static string GetHierarchy(string paramsJson)
         {
             var rootObjects = SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
             var entries = new List<string>();
@@ -35,7 +35,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             return JsonHelper.BuildJsonArray(entries.ToArray());
         }
 
-        private string BuildTreeEntry(GameObject go, string path)
+        private static string BuildTreeEntry(GameObject go, string path)
         {
             // Collect component names
             var components = go.GetComponents<Component>();
@@ -66,7 +66,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
 
         [MCPTool(MCPMethodConst.GET_OBJECTS, "Find GameObjects in the scene by optional name filter — returns instanceId + path for each")]
-        public string GetObjects(string paramsJson)
+        public static string GetObjects(string paramsJson)
         {
             var filter = ParseJsonObject(paramsJson);
             filter.TryGetValue("nameContains", out var nameFilterObj);
@@ -88,7 +88,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
 
         [MCPTool(MCPMethodConst.CREATE_OBJECT, "Create a new GameObject with optional name, position, rotation, scale, and parent (by instanceId or path)")]
-        public string CreateObject(string paramsJson)
+        public static string CreateObject(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
             var name = GetString(args, "name", "New GameObject");
@@ -115,7 +115,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
 
         [MCPTool(MCPMethodConst.DELETE_OBJECT, "Destroy a GameObject by instanceId or path")]
-        public string DeleteObject(string paramsJson)
+        public static string DeleteObject(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
             var go = ResolveTarget(args);
@@ -127,7 +127,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
 
         [MCPTool(MCPMethodConst.SET_TRANSFORM, "Set position, rotation, and/or scale of a GameObject by instanceId or path")]
-        public string SetTransform(string paramsJson)
+        public static string SetTransform(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
             var go = ResolveTarget(args);
@@ -150,7 +150,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
 
         [MCPTool(MCPMethodConst.SET_COMPONENT_PROPERTY, "Set a serializable property value on a component of a GameObject (by instanceId or path)")]
-        public string SetComponentProperty(string paramsJson)
+        public static string SetComponentProperty(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
             var go = ResolveTarget(args);
@@ -203,7 +203,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
 
         [MCPTool(MCPMethodConst.GET_COMPONENTS, "Get all components on a GameObject by instanceId or path — returns type names and assembly info")]
-        public string GetComponents(string paramsJson)
+        public static string GetComponents(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
             var go = ResolveTarget(args);
@@ -232,7 +232,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
 
         [MCPTool(MCPMethodConst.GET_COMPONENT_PROPERTIES, "Get all serializable properties and current values of a component on a GameObject (by instanceId or path)")]
-        public string GetComponentProperties(string paramsJson)
+        public static string GetComponentProperties(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
             var go = ResolveTarget(args);
@@ -295,7 +295,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
 
         [MCPTool(MCPMethodConst.SET_ACTIVE, "Enable or disable a GameObject by instanceId or path")]
-        public string SetActive(string paramsJson)
+        public static string SetActive(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
             var go = ResolveTarget(args);
@@ -309,7 +309,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
 
         [MCPTool(MCPMethodConst.DUPLICATE_OBJECT, "Duplicate a GameObject by instanceId or path")]
-        public string DuplicateObject(string paramsJson)
+        public static string DuplicateObject(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
             var go = ResolveTarget(args);
@@ -323,7 +323,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
 
         [MCPTool(MCPMethodConst.RENAME, "Rename a GameObject by instanceId or path")]
-        public string Rename(string paramsJson)
+        public static string Rename(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
             var go = ResolveTarget(args);
@@ -337,7 +337,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
 
         [MCPTool(MCPMethodConst.SET_PARENT, "Set parent of a GameObject by instanceId/path and optional parentId/parentPath. Leave parent empty to unparent to root.")]
-        public string SetParent(string paramsJson)
+        public static string SetParent(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
             var go = ResolveTarget(args);
@@ -355,7 +355,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
 
         [MCPTool(MCPMethodConst.ADD_COMPONENT, "Add a component to a GameObject by instanceId or path and type name (e.g. Rigidbody, BoxCollider)")]
-        public string AddComponent(string paramsJson)
+        public static string AddComponent(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
             var go = ResolveTarget(args);
@@ -380,21 +380,21 @@ namespace SimpleMCPBridge.Runtime.Handlers
 
 #if UNITY_EDITOR
         [MCPTool(MCPMethodConst.ENTER_PLAY_MODE, "Enter Play Mode in the Unity Editor")]
-        public string EnterPlayMode(string paramsJson)
+        public static string EnterPlayMode(string paramsJson)
         {
             UnityEditor.EditorApplication.isPlaying = true;
             return JsonHelper.BuildJsonObject(("success", "true"));
         }
 
         [MCPTool(MCPMethodConst.EXIT_PLAY_MODE, "Exit Play Mode in the Unity Editor")]
-        public string ExitPlayMode(string paramsJson)
+        public static string ExitPlayMode(string paramsJson)
         {
             UnityEditor.EditorApplication.isPlaying = false;
             return JsonHelper.BuildJsonObject(("success", "true"));
         }
 
         [MCPTool(MCPMethodConst.PAUSE_PLAY_MODE, "Pause or resume Play Mode in the Unity Editor — set paused=true to pause, false to resume")]
-        public string PausePlayMode(string paramsJson)
+        public static string PausePlayMode(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
             var paused = GetRequiredBool(args, "paused");
@@ -403,14 +403,14 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
 
         [MCPTool(MCPMethodConst.REQUEST_COMPILE, "Request Unity to recompile all scripts (useful after editing C# files externally via filesystem)")]
-        public string RequestCompile(string paramsJson)
+        public static string RequestCompile(string paramsJson)
         {
             UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation();
             return JsonHelper.BuildJsonObject(("success", "true"));
         }
 
         [MCPTool(MCPMethodConst.OPEN_WINDOW, "Open a Unity Editor window by menu path — use the exact path as shown in Unity's menu bar (e.g. 'Tools/SimpleMCPBridge', 'Window/General/Console'). Returns an error if the menu item is not found.")]
-        public string OpenWindow(string paramsJson)
+        public static string OpenWindow(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
             var menuPath = GetRequiredString(args, "menuPath");
@@ -419,7 +419,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
 
         [MCPTool(MCPMethodConst.GET_PLAY_MODE, "Get current Unity Editor play mode state — returns playing/paused/edit mode status")]
-        public string GetPlayMode(string paramsJson)
+        public static string GetPlayMode(string paramsJson)
         {
             var mode = "edit";
             if (UnityEditor.EditorApplication.isPlaying)
@@ -442,7 +442,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         /// Resolve a GameObject from tool arguments.
         /// Priority: instanceId (precise) → path (domain-reload safe).
         /// </summary>
-        private GameObject ResolveTarget(Dictionary<string, object> args)
+        private static GameObject ResolveTarget(Dictionary<string, object> args)
         {
             // Try instanceId first (fast scan, survives renames/moves)
             var instanceId = GetOptionalInt(args, "instanceId");
@@ -467,7 +467,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         /// Priority: parentId → parentPath.
         /// Returns null if no parent specified (meaning "unparent to root").
         /// </summary>
-        private GameObject ResolveParentTarget(Dictionary<string, object> args)
+        private static GameObject ResolveParentTarget(Dictionary<string, object> args)
         {
             var parentId = GetOptionalInt(args, "parentId");
             if (parentId.HasValue && parentId.Value != 0)
@@ -485,7 +485,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             return null;
         }
 
-        private GameObject FindObjectById(int instanceId)
+        private static GameObject FindObjectById(int instanceId)
         {
             // We can't do a direct lookup by instanceId, so we scan.
             // For large scenes this is slow, but acceptable for Phase 1.
@@ -504,7 +504,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         /// Walks root objects + Transform.Find for the remaining segments.
         /// Inactive objects ARE included (root objects include all).
         /// </summary>
-        private GameObject FindObjectByPath(string path)
+        private static GameObject FindObjectByPath(string path)
         {
             if (string.IsNullOrEmpty(path)) return null;
             var parts = path.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
@@ -526,7 +526,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             return null;
         }
 
-        private Component FindComponentByTypeName(GameObject go, string typeName)
+        private static Component FindComponentByTypeName(GameObject go, string typeName)
         {
             var components = go.GetComponents<Component>();
             foreach (var comp in components)
@@ -538,7 +538,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             return null;
         }
 
-        private object ConvertValue(object rawValue, Type targetType)
+        private static object ConvertValue(object rawValue, Type targetType)
         {
             if (rawValue == null)
                 return targetType.IsValueType ? Activator.CreateInstance(targetType) : null;
@@ -632,7 +632,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         // ── Asset tools (Editor only) ──
 
         [MCPTool(MCPMethodConst.INSTANTIATE_PREFAB, "Instantiate a prefab from project Assets into the scene by asset path")]
-        public string InstantiatePrefab(string paramsJson)
+        public static string InstantiatePrefab(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
             var assetPath = GetRequiredString(args, "assetPath");
@@ -661,7 +661,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
 
         [MCPTool(MCPMethodConst.SET_MATERIAL, "⚠ Set material color and/or main texture on a Renderer (by instanceId or path). For asset-level material edits, prefer editing .meta GUIDs via filesystem — faster.")]
-        public string SetMaterial(string paramsJson)
+        public static string SetMaterial(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
             var go = ResolveTarget(args);

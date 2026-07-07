@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 
 namespace SimpleMCPBridge.Runtime
@@ -18,75 +19,91 @@ namespace SimpleMCPBridge.Runtime
         private readonly Dictionary<string, ToolEntry> _tools = new();
 
         /// <summary>
-        /// Scan an object instance for [MCPTool] methods and register them.
-        /// Call this for each handler instance during startup.
+        /// Register a single [MCPTool] method (static or instance).
         /// </summary>
-        public void Register(object handlerInstance)
+        private void RegisterMethod(MethodInfo method, string name, string description, object instance = null)
         {
-            if (handlerInstance == null)
-                throw new ArgumentNullException(nameof(handlerInstance));
-
-            var type = handlerInstance.GetType();
-            var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance);
-
-            foreach (var method in methods)
+            // Validate: (string) -> string
+            var parameters = method.GetParameters();
+            if (parameters.Length != 1 || parameters[0].ParameterType != typeof(string))
             {
-                var attr = method.GetCustomAttribute<MCPToolAttribute>();
-                if (attr == null) continue;
-
-                // Validate method signature: must be (string) -> string
-                var parameters = method.GetParameters();
-                if (parameters.Length != 1 || parameters[0].ParameterType != typeof(string))
-                {
-                    UnityEngine.Debug.LogWarning(
-                        $"[MCPToolRegistry] Skipping '{type.Name}.{method.Name}': must accept a single string parameter (paramsJson).");
-                    continue;
-                }
-                if (method.ReturnType != typeof(string))
-                {
-                    UnityEngine.Debug.LogWarning(
-                        $"[MCPToolRegistry] Skipping '{type.Name}.{method.Name}': must return string.");
-                    continue;
-                }
-
-                if (_tools.ContainsKey(attr.Name))
-                {
-                    UnityEngine.Debug.LogWarning(
-                        $"[MCPToolRegistry] Duplicate tool name '{attr.Name}' from '{type.Name}.{method.Name}' — keeping first registration.");
-                    continue;
-                }
-
-                _tools[attr.Name] = new ToolEntry(attr.Name, attr.Description, method, handlerInstance);
+                UnityEngine.Debug.LogWarning(
+                    $"[MCPToolRegistry] Skipping '{method.DeclaringType?.Name}.{method.Name}': must accept a single string parameter.");
+                return;
             }
+            if (method.ReturnType != typeof(string))
+            {
+                UnityEngine.Debug.LogWarning(
+                    $"[MCPToolRegistry] Skipping '{method.DeclaringType?.Name}.{method.Name}': must return string.");
+                return;
+            }
+
+            if (_tools.ContainsKey(name))
+            {
+                UnityEngine.Debug.LogWarning(
+                    $"[MCPToolRegistry] Duplicate tool name '{name}' from '{method.DeclaringType?.Name}.{method.Name}' — keeping first registration.");
+                return;
+            }
+
+            var del = instance != null
+                ? (Func<string, string>)method.CreateDelegate(typeof(Func<string, string>), instance)
+                : (Func<string, string>)method.CreateDelegate(typeof(Func<string, string>));
+
+            _tools[name] = new ToolEntry(name, description, del);
+            UnityEngine.Debug.Log($"[MCPToolRegistry] Registered '{method.DeclaringType?.Name}.{method.Name}' as '{name}'");
         }
 
         /// <summary>
-        /// Auto-discover all [MCPTool] handlers by scanning all loaded assemblies.
-        /// Only types with a parameterless constructor are auto-registered;
-        /// abstract/interface types and types that fail to instantiate are skipped.
+        /// Auto-discover all [MCPTool] handlers (static and instance methods) in all loaded assemblies.
+        /// Static handlers need no instantiation; instance handlers (if any) require a parameterless constructor.
         /// </summary>
         public void AutoRegisterAll()
         {
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
-                foreach (var type in assembly.GetTypes())
+                Type[] types;
+                try
+                {
+                    types = assembly.GetTypes();
+                }
+                catch (ReflectionTypeLoadException ex)
+                {
+                    types = ex.Types?.Where(t => t != null).ToArray();
+                    if (types == null || types.Length == 0) continue;
+                }
+                catch
+                {
+                    continue;
+                }
+
+                foreach (var type in types)
                 {
                     if (type.IsAbstract || type.IsInterface) continue;
-                    if (type.GetConstructor(Type.EmptyTypes) == null) continue;
+
+                    // ── Static methods ──
+                    foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy))
+                    {
+                        var attr = method.GetCustomAttribute<MCPToolAttribute>();
+                        if (attr == null) continue;
+                        RegisterMethod(method, attr.Name, attr.Description);
+                    }
+
+                    // ── Instance methods (needs parameterless ctor) ──
+                    var ctor = type.GetConstructor(Type.EmptyTypes);
+                    if (ctor == null) continue;
 
                     foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance))
                     {
-                        if (method.GetCustomAttribute<MCPToolAttribute>() != null)
+                        var attr = method.GetCustomAttribute<MCPToolAttribute>();
+                        if (attr == null) continue;
+
+                        try
                         {
-                            try
-                            {
-                                var instance = Activator.CreateInstance(type);
-                                Register(instance);
-                                UnityEngine.Debug.Log($"[MCPToolRegistry] Auto-registered '{type.Name}'");
-                            }
-                            catch { }
-                            break; // move to next type
+                            var instance = Activator.CreateInstance(type);
+                            RegisterMethod(method, attr.Name, attr.Description, instance);
                         }
+                        catch { }
+                        break;
                     }
                 }
             }
@@ -106,15 +123,8 @@ namespace SimpleMCPBridge.Runtime
             if (!_tools.TryGetValue(name, out var entry))
                 throw new NotImplementedException($"Unknown method: {name}");
 
-            try
-            {
-                return (string)entry.Method.Invoke(entry.Instance, new object[] { paramsJson ?? "{}" });
-            }
-            catch (TargetInvocationException ex)
-            {
-                // Unwrap reflection-invoked exceptions
-                throw ex.InnerException ?? ex;
-            }
+            // Direct delegate call — orders of magnitude faster than MethodInfo.Invoke
+            return entry.Delegate(paramsJson ?? "{}");
         }
 
         /// <summary>
@@ -136,15 +146,13 @@ namespace SimpleMCPBridge.Runtime
         {
             public string Name { get; }
             public string Description { get; }
-            public MethodInfo Method { get; }
-            public object Instance { get; }
+            public Func<string, string> Delegate { get; }
 
-            public ToolEntry(string name, string description, MethodInfo method, object instance)
+            public ToolEntry(string name, string description, Func<string, string> del)
             {
                 Name = name;
                 Description = description;
-                Method = method;
-                Instance = instance;
+                Delegate = del;
             }
 
             public string ToJson()
@@ -155,4 +163,4 @@ namespace SimpleMCPBridge.Runtime
         }
     }
 }
-// mcp-revision: 181632
+// mcp-revision: 181633

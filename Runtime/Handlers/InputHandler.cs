@@ -1,5 +1,6 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Globalization;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using static SimpleMCPBridge.Runtime.Handlers.HandlerUtils;
@@ -21,11 +22,16 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "Goes through Unity EventSystem: RaycastAll → PointerDown → PointerUp → PointerClick. " +
             "Returns hit objects and which one received the click. " +
             "Requires an active EventSystem in the scene (Play Mode or Runtime).")]
-        public string ClickScreen(string paramsJson)
+        public static string ClickScreen(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
-            var nx = GetRequiredFloat(args, "x");
-            var ny = GetRequiredFloat(args, "y");
+            return ProcessClick(args["x"], args["y"], 0);
+        }
+
+        private static string ProcessClick(object rawX, object rawY, int button)
+        {
+            var nx = System.Convert.ToSingle(rawX, CultureInfo.InvariantCulture);
+            var ny = System.Convert.ToSingle(rawY, CultureInfo.InvariantCulture);
 
             // Validate EventSystem exists
             if (EventSystem.current == null)
@@ -91,6 +97,40 @@ namespace SimpleMCPBridge.Runtime.Handlers
                 ("hits", JsonHelper.BuildJsonArray(hitJsons.ToArray()))
             );
         }
+
+        // ── 鼠标模拟 ──
+        // 使用 EventSystem ExecuteHierarchy 路径（与 click_screen 相同）。
+        // 适用于 UI 元素（Button、Toggle 等）。如需直接操作 Input System（3D 对象），
+        // 需后续扩展。
+
+        [MCPTool(MCPMethodConst.MOUSE_CLICK, "Simulate a mouse click at a normalized screen position. " +
+            "Coordinates are normalized 0.0~1.0 (0.5,0.5 = center). " +
+            "Optional 'button' param: 0=left (default), 1=right, 2=middle. " +
+            "Uses MouseDeviceTools (Input System virtual mouse). " +
+            "Works on objects receiving Input System events.")]
+        public static string MouseClick(string paramsJson)
+        {
+            var args = ParseJsonObject(paramsJson);
+            var nx = GetRequiredFloat(args, "x");
+            var ny = GetRequiredFloat(args, "y");
+            var button = args.TryGetValue("button", out var b) ? System.Convert.ToInt32(b) : 0;
+
+            var uv = new Vector2(nx, ny);
+            MouseDeviceTools.ClickMouse(uv, button);
+
+            var screenPos = new Vector2(nx * Screen.width, ny * Screen.height);
+            return JsonHelper.BuildJsonObject(
+                ("success", "true"),
+                ("screenPos", JsonHelper.FloatArrayJson(new[] { screenPos.x, screenPos.y })),
+                ("normalizedPos", JsonHelper.FloatArrayJson(new[] { nx, ny })),
+                ("button", button.ToString(CultureInfo.InvariantCulture))
+            );
+        }
+        //public string MouseClick(string paramsJson)
+        //{
+        //    var args = ParseJsonObject(paramsJson);
+        //    return ProcessClick(args["x"], args["y"], 0);
+        //}
 
         // ── Helpers ──
 

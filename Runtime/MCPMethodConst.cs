@@ -67,5 +67,7 @@ namespace SimpleMCPBridge.Runtime
         // ── 输入模拟工具 ──
         /// <summary>在屏幕指定位置模拟点击（通过 EventSystem 完整事件管线）。</summary>
         public const string CLICK_SCREEN = "input.click_screen";
+        /// <summary>在屏幕指定位置模拟鼠标点击（通过 Input System 低层级事件队列）。</summary>
+        public const string MOUSE_CLICK = "input.mouse_click";
     }
 }
