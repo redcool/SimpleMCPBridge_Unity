@@ -6,20 +6,19 @@ using UnityEditor;
 using UnityEditor.Compilation;
 using UnityEngine;
 
-namespace SimpleMCPBridge.Editor
+namespace SimpleMCPBridge
 {
     /// <summary>
     /// Editor Window for controlling the SimpleMCPBridge connection.
     /// Provides Server IP/Port, Bridge GUID display, Connect/Disconnect toggle,
     /// and real-time status (including connection failure reasons).
     ///
-    /// Bridge lifecycle (create Default, DrainQueue, auto-reconnect) runs in a
-    /// static EditorApplication.update handler. The handler is subscribed once
-    /// when the user first opens the window (ShowWindow) and cleaned up on
-    /// EditorApplication.quitting — NOT tied to OnEnable/OnDisable.
-    /// After domain reload, the static constructor re-subscribes automatically.
-    ///
-    /// This ensures the bridge keeps working even when the window is closed.
+    /// Lifecycle:
+    ///   - Static constructor only subscribes safety-net cleanup (quitting, domainUnload)
+    ///   - Start() is called on user Connect: subscribes active events, disables
+    ///     scene AutoStartBridge so only one management loop runs
+    ///   - Stop() is called on user Disconnect: unsubscribes events, re-enables
+    ///     AutoStartBridge
     ///
     /// Config is stored in Assets/SimpleMCPBridge/bridge-config.json.
     /// Open via: PowerUtilities > SimpleMCPBridge
@@ -33,9 +32,10 @@ namespace SimpleMCPBridge.Editor
 
         private static string s_serverIp = "127.0.0.1";
         private static int s_serverPort = 45678;
+        private static float s_lastReconnectTime; // throttle for fallback reconnect
 
         /// <summary>
-        /// Persisted flag: true after user first clicks Connect.
+        /// Persisted flag: true after user clicks Connect, cleared on Disconnect/Stop.
         /// Survives domain reload. StaticUpdate no-ops until this is true.
         /// </summary>
         private static bool s_activated
@@ -44,22 +44,73 @@ namespace SimpleMCPBridge.Editor
             set => EditorPrefs.SetBool(k_ActivatedKey, value);
         }
 
+        /// <summary>Tracks whether EditorApplication.update is subscribed.</summary>
+        private static bool s_updateSubscribed;
+
         /// <summary>
         /// Static constructor: fires on every domain reload.
-        /// Subscribes EditorApplication.update unconditionally (safe via -= before +=).
-        /// StaticUpdate itself gates on s_activated, so it no-ops until user connects.
+        /// Only subscribes safety-net cleanup events (Editor quit, domain unload).
+        /// Active events (update, playModeStateChanged) are subscribed by Start().
         /// </summary>
         static MCPBridgeWindow()
         {
             LoadStaticConfig();
-            EditorApplication.update -= StaticUpdate;
-            EditorApplication.update += StaticUpdate;
             EditorApplication.quitting -= OnEditorQuit;
             EditorApplication.quitting += OnEditorQuit;
-
             AppDomain.CurrentDomain.DomainUnload += CurrentDomain_DomainUnload;
+        }
+
+        /// <summary>
+        /// Start the bridge management loop: subscribe active editor events,
+        /// disable scene AutoStartBridge to prevent competing reconnect loops.
+        /// Called from ConnectToServer() when user clicks Connect.
+        /// </summary>
+        public static void Start()
+        {
+            if (s_updateSubscribed) return;
+
+            // Disable AutoStartBridge scene object if present
+            var autoBridge = UnityEngine.Object.FindObjectOfType<AutoStartBridge>();
+            if (autoBridge != null)
+                autoBridge.gameObject.SetActive(false);
+
+            if (MCPBridge.Default != null)
+                MCPBridge.Default.IsAutoReconnect = true;
+
+            EditorApplication.update -= StaticUpdate;
+            EditorApplication.update += StaticUpdate;
             EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+            s_activated = true;
+            s_updateSubscribed = true;
+
+            DebugUtils.Log("[MCPBridgeWindow] Started bridge management (AutoStartBridge disabled if present)");
+        }
+
+        /// <summary>
+        /// Stop the bridge management loop: unsubscribe active editor events,
+        /// re-enable scene AutoStartBridge, disconnect the bridge.
+        /// Called from DisconnectFromServer() or cleanup paths.
+        /// </summary>
+        public static void Stop()
+        {
+            if (!s_updateSubscribed) return;
+
+            // Re-enable AutoStartBridge scene object
+            var autoBridge = UnityEngine.Object.FindObjectOfType<AutoStartBridge>(true);
+            if (autoBridge != null)
+                autoBridge.gameObject.SetActive(true);
+
+            EditorApplication.update -= StaticUpdate;
+            EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
+            s_activated = false;
+            s_updateSubscribed = false;
+
+            if (MCPBridge.Default != null)
+                MCPBridge.Default.IsAutoReconnect = false;
+            MCPBridge.Default?.Disconnect();
+
+            DebugUtils.Log("[MCPBridgeWindow] Stopped bridge management (AutoStartBridge re-enabled if present)");
         }
 
         /// <summary>
@@ -82,11 +133,10 @@ namespace SimpleMCPBridge.Editor
             MCPBridge.Default?.Disconnect();
         }
 
-
         private static void OnEditorQuit()
         {
-            EditorApplication.update -= StaticUpdate;
-            EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
+            Stop();
+            EditorApplication.quitting -= OnEditorQuit;
             AppDomain.CurrentDomain.DomainUnload -= CurrentDomain_DomainUnload;
         }
 
@@ -106,9 +156,13 @@ namespace SimpleMCPBridge.Editor
             var b = MCPBridge.Default;
             b.DrainQueue();
 
-            // Auto-reconnect: if disconnected and user wants it
+            // ── Auto-reconnect (throttled 0.5s) ──
             if (!b.IsConnected && b.IsAutoReconnect)
             {
+                if (Time.unscaledTime - s_lastReconnectTime < 0.5f)
+                    return;
+                s_lastReconnectTime = Time.unscaledTime;
+
                 b.ConnectToServer(s_serverIp, s_serverPort);
             }
         }
@@ -121,7 +175,7 @@ namespace SimpleMCPBridge.Editor
                 if (File.Exists(configPath))
                 {
                     var json = File.ReadAllText(configPath);
-                    var cfg = JsonUtility.FromJson<ConfigData>(json);
+                    var cfg = JsonUtility.FromJson<BridgeConfig>(json);
                     if (cfg != null)
                     {
                         s_serverIp = string.IsNullOrEmpty(cfg.serverIp) ? s_serverIp : cfg.serverIp;
@@ -131,7 +185,7 @@ namespace SimpleMCPBridge.Editor
             }
             catch (System.Exception ex)
             {
-                Debug.LogWarning($"[MCPBridgeWindow] Failed to load bridge-config.json: {ex.Message}");
+                DebugUtils.LogWarning($"[MCPBridgeWindow] Failed to load bridge-config.json: {ex.Message}");
             }
         }
 
@@ -298,10 +352,9 @@ namespace SimpleMCPBridge.Editor
             SaveConfig();
             Repaint();
 
-            s_activated = true;
-            _bridge.IsAutoReconnect = true;
+            Start(); // subscribe events + disable AutoStartBridge
             _bridge.ConnectToServer(s_serverIp, s_serverPort);
-            Debug.Log($"[MCPBridgeWindow] Connecting to ws://{s_serverIp}:{s_serverPort} (ID: {_bridge?.BridgeId ?? "null"})");
+            DebugUtils.Log($"[MCPBridgeWindow] Connecting to ws://{s_serverIp}:{s_serverPort} (ID: {_bridge?.BridgeId ?? "null"})");
         }
 
         private void WireBridgeEvents(MCPBridge bridge)
@@ -317,7 +370,7 @@ namespace SimpleMCPBridge.Editor
             _lastError = reason;
             _isConnecting = false;
             Repaint();
-            Debug.Log($"[MCPBridgeWindow] Connection failed: {reason}");
+            DebugUtils.Log($"[MCPBridgeWindow] Connection failed: {reason}");
         }
 
         private void OnBridgeConnectedSuccess()
@@ -330,12 +383,12 @@ namespace SimpleMCPBridge.Editor
         private void DisconnectFromServer()
         {
             if (_bridge == null) return;
-            _bridge.IsAutoReconnect = false;
-            _bridge.Disconnect();
+
+            Stop(); // unsubscribe events + re-enable AutoStartBridge + disconnect
             _isConnecting = false;
             _lastError = null;
             Repaint();
-            Debug.Log("[MCPBridgeWindow] Disconnected");
+            DebugUtils.Log("[MCPBridgeWindow] Disconnected");
         }
 
         private void SaveConfig()
@@ -344,22 +397,13 @@ namespace SimpleMCPBridge.Editor
             {
                 var dir = Path.GetDirectoryName(ConfigPath);
                 if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-                var cfg = new ConfigData { serverIp = s_serverIp, serverPort = s_serverPort };
+                var cfg = new BridgeConfig { serverIp = s_serverIp, serverPort = s_serverPort };
                 File.WriteAllText(ConfigPath, JsonUtility.ToJson(cfg, true));
             }
             catch (System.Exception ex)
             {
-                Debug.LogWarning($"[MCPBridgeWindow] Failed to save bridge-config.json: {ex.Message}");
+                DebugUtils.LogWarning($"[MCPBridgeWindow] Failed to save bridge-config.json: {ex.Message}");
             }
-        }
-
-        // ── Config model ──
-
-        [System.Serializable]
-        private class ConfigData
-        {
-            public string serverIp = "127.0.0.1";
-            public int serverPort = 45678;
         }
     }
 }

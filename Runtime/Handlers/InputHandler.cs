@@ -15,6 +15,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
     ///   - input.click_screen — simulate a click at a normalized screen position (0.0~1.0)
     ///     Goes through full pointer event sequence: RaycastAll → PointerDown → PointerUp → PointerClick
     /// </summary>
+    [MCPToolClass]
     public class InputHandler
     {
         [MCPTool(MCPMethodConst.CLICK_SCREEN, "Simulate a user click at a screen position. " +

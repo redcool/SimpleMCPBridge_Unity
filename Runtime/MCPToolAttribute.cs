@@ -18,5 +18,15 @@ namespace SimpleMCPBridge.Runtime
             Description = description ?? "";
         }
     }
+
+    /// <summary>
+    /// Marks a class that contains [MCPTool] methods.
+    /// Speeds up tool discovery: AutoRegisterAll checks this type-level attribute
+    /// first, skipping full method reflection for unrelated types.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Class, Inherited = false)]
+    public class MCPToolClassAttribute : Attribute
+    {
+    }
 }
 // mcp-revision: 181632

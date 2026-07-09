@@ -17,14 +17,14 @@ namespace SimpleMCPBridge.Editor
         {
             if (Object.FindObjectOfType<AutoStartBridge>() != null)
             {
-                Debug.Log("[AutoStartBridge] Already exists in scene — skipping");
+                DebugUtils.Log("[AutoStartBridge] Already exists in scene — skipping");
                 return;
             }
 
             var go = new GameObject("[AutoStartBridge]");
             go.hideFlags = HideFlags.None;
             go.AddComponent<AutoStartBridge>();
-            Debug.Log("[AutoStartBridge] Created AutoStartBridge GameObject");
+            DebugUtils.Log("[AutoStartBridge] Created AutoStartBridge GameObject");
         }
     }
 }

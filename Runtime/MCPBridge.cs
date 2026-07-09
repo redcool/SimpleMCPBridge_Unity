@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Concurrent;
-using System.IO;
 using System.Threading.Tasks;
 using UnityEngine;
 #if UNITY_EDITOR
@@ -28,7 +27,7 @@ namespace SimpleMCPBridge.Runtime
         private const int LogPreviewLength = 80;
         private const int ResponseLogLength = 100;
 
-        private string _logPath;
+        
         private IWebSocketClient _client;
         private MessageRouter _router;
         private readonly ConcurrentQueue<Action> _mainThreadQueue = new();
@@ -87,10 +86,7 @@ namespace SimpleMCPBridge.Runtime
 
         public MCPBridge()
         {
-            var projectDir = Path.GetDirectoryName(Application.dataPath) ?? ".";
-            var logDir = Path.Combine(projectDir, "Logs");
-            Directory.CreateDirectory(logDir);
-            _logPath = Path.Combine(logDir, "mcp_bridge_debug.log");
+            _router = new MessageRouter();
         }
 
         // ── Public API ──
@@ -108,7 +104,6 @@ namespace SimpleMCPBridge.Runtime
 
             Log($"ConnectToServer({host}:{port})");
 
-            _router = new MessageRouter();
             // Force-clean any previous client (even stuck-connecting ones)
             if (_client != null)
             {
@@ -134,8 +129,7 @@ namespace SimpleMCPBridge.Runtime
             {
                 _mainThreadQueue.Enqueue(() =>
                 {
-                    Log("Connected to server");
-                    Debug.Log($"[SimpleMCPBridge] Connected to SimpleMcpServer at ws://{Host}:{Port}");
+                    Log($"Connected to server — ws://{Host}:{Port}");
                     OnConnectedSuccess?.Invoke();
                 });
 #if UNITY_EDITOR
@@ -148,7 +142,7 @@ namespace SimpleMCPBridge.Runtime
                 _mainThreadQueue.Enqueue(() =>
                 {
                     Log("Disconnected from server");
-                    Debug.LogWarning($"[SimpleMCPBridge] Disconnected from SimpleMcpServer");
+                    LogWarning("Disconnected from SimpleMcpServer");
                 });
             };
 
@@ -171,7 +165,7 @@ namespace SimpleMCPBridge.Runtime
             Log("Disconnect called");
             _client?.Disconnect();
             _client = null;
-            _router = null;
+            // _router is created once in constructor — do NOT null it
 
             while (_mainThreadQueue.TryDequeue(out _)) { }
         }
@@ -238,7 +232,7 @@ namespace SimpleMCPBridge.Runtime
             {
                 var reason = $"{ex.GetType().Name}: {ex.Message}";
                 Log($"Connection failed: {reason}");
-                Debug.LogWarning($"[SimpleMCPBridge] Cannot reach SimpleMcpServer at {Host}:{Port} — {ex.Message}");
+                LogWarning($"Cannot reach SimpleMcpServer at {Host}:{Port} — {ex.Message}");
                 OnConnectionFailed?.Invoke(reason);
             }
         }
@@ -316,7 +310,6 @@ namespace SimpleMCPBridge.Runtime
             var response = _router.HandleMessage(rawMessage);
             if (response != null)
             {
-                Debug.Log($"  Response: {response.Substring(0, Math.Min(response.Length, ResponseLogLength))}...");
                 Log($"  Response: {response.Substring(0, Math.Min(response.Length, ResponseLogLength))}...");
                 var client = _client;
                 if (client != null && client.IsConnected)
@@ -332,14 +325,12 @@ namespace SimpleMCPBridge.Runtime
 
         private void Log(string msg)
         {
-            try
-            {
-                using (var writer = new StreamWriter(_logPath, append: true, encoding: System.Text.Encoding.UTF8))
-                {
-                    writer.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] {msg}");
-                }
-            }
-            catch { }
+            DebugUtils.Log(msg);
+        }
+
+        private void LogWarning(string msg)
+        {
+            DebugUtils.LogWarning(msg);
         }
 
         /// <summary>

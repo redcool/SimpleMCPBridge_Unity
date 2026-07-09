@@ -22,6 +22,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
     ///   2. path — transform path ("Canvas/Panel/Button"), survives domain reload
     ///   All public tools accept both "instanceId" and "path" parameters.
     /// </summary>
+    [MCPToolClass]
     public class SceneHandler
     {
         [MCPTool(MCPMethodConst.GET_HIERARCHY, "Get the full scene hierarchy as a tree of objects with position, components, children, and transform path")]
@@ -673,34 +674,39 @@ namespace SimpleMCPBridge.Runtime.Handlers
             if (targetType == typeof(string)) return rawValue.ToString();
             if (targetType == typeof(Vector2))
             {
-                if (rawValue is float[] a2 && a2.Length >= 2)
-                    return new Vector2(a2[0], a2[1]);
+                var v2 = ToFloatArray(rawValue);
+                if (v2 != null && v2.Length >= 2)
+                    return new Vector2(v2[0], v2[1]);
                 return Vector2.zero;
             }
             if (targetType == typeof(Vector3))
             {
-                if (rawValue is float[] a3 && a3.Length >= 3)
-                    return new Vector3(a3[0], a3[1], a3[2]);
+                var v3 = ToFloatArray(rawValue);
+                if (v3 != null && v3.Length >= 3)
+                    return new Vector3(v3[0], v3[1], v3[2]);
                 return Vector3.zero;
             }
             if (targetType == typeof(Vector4))
             {
-                if (rawValue is float[] a4v && a4v.Length >= 4)
-                    return new Vector4(a4v[0], a4v[1], a4v[2], a4v[3]);
+                var v4 = ToFloatArray(rawValue);
+                if (v4 != null && v4.Length >= 4)
+                    return new Vector4(v4[0], v4[1], v4[2], v4[3]);
                 return Vector4.zero;
             }
             if (targetType == typeof(Quaternion))
             {
-                if (rawValue is float[] aq && aq.Length >= 4)
-                    return new Quaternion(aq[0], aq[1], aq[2], aq[3]);
+                var vq = ToFloatArray(rawValue);
+                if (vq != null && vq.Length >= 4)
+                    return new Quaternion(vq[0], vq[1], vq[2], vq[3]);
                 return Quaternion.identity;
             }
             if (targetType == typeof(Color))
             {
-                if (rawValue is float[] ac && ac.Length >= 4)
-                    return new Color(ac[0], ac[1], ac[2], ac[3]);
-                if (rawValue is float[] ac3 && ac3.Length >= 3)
-                    return new Color(ac3[0], ac3[1], ac3[2], 1f);
+                var vc = ToFloatArray(rawValue);
+                if (vc != null && vc.Length >= 4)
+                    return new Color(vc[0], vc[1], vc[2], vc[3]);
+                if (vc != null && vc.Length >= 3)
+                    return new Color(vc[0], vc[1], vc[2], 1f);
                 return Color.white;
             }
             if (targetType.IsEnum)

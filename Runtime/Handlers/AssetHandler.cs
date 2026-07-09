@@ -17,6 +17,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
     ///   - asset.find_assets     — search Assets/ by name and/or type
     ///   - asset.find_references — find all assets that reference a given asset (reverse dependency)
     /// </summary>
+    [MCPToolClass]
     public class AssetHandler
     {
         /// <summary>

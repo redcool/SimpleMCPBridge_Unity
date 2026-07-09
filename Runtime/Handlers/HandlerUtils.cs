@@ -149,11 +149,32 @@ namespace SimpleMCPBridge.Runtime.Handlers
             throw new ArgumentException($"Parameter '{key}' must be a boolean, got '{s}'");
         }
 
+        /// <summary>
+        /// Convert an unknown object (from JSON parsing) to float[].
+        /// Handles float[], int[], double[], IList (e.g. List{object}), etc.
+        /// Returns null if the value is not a numeric collection.
+        /// </summary>
+        public static float[] ToFloatArray(object v)
+        {
+            if (v == null) return null;
+            if (v is float[] arr) return arr;
+            if (v is int[] intArr) return Array.ConvertAll(intArr, i => (float)i);
+            if (v is double[] dblArr) return Array.ConvertAll(dblArr, d => (float)d);
+            if (v is System.Collections.IList list)
+            {
+                var result = new List<float>(list.Count);
+                foreach (var item in list)
+                    result.Add(Convert.ToSingle(item, CultureInfo.InvariantCulture));
+                return result.ToArray();
+            }
+            return null;
+        }
+
         public static float[] GetOptionalFloatArray(Dictionary<string, object> dict, string key)
         {
-            if (dict.TryGetValue(key, out var v) && v is float[] arr)
-                return arr;
-            return null;
+            if (!dict.TryGetValue(key, out var v) || v == null)
+                return null;
+            return ToFloatArray(v);
         }
 
         public static object GetRawValue(Dictionary<string, object> dict, string key)

@@ -46,7 +46,7 @@ namespace SimpleMCPBridge.Runtime
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[SimpleMCPBridge] Failed to parse message: {ex.Message}");
+                DebugUtils.LogError($"[SimpleMCPBridge] Failed to parse message: {ex.Message}");
                 return BuildErrorResponse(null, "Failed to parse request JSON");
             }
 
@@ -73,7 +73,7 @@ namespace SimpleMCPBridge.Runtime
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[SimpleMCPBridge] Error handling '{request.method}': {ex.Message}");
+                DebugUtils.LogError($"[SimpleMCPBridge] Error handling '{request.method}': {ex.Message}");
                 return BuildErrorResponse(request.id, ex.Message);
             }
         }

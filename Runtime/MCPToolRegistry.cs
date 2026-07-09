@@ -19,43 +19,41 @@ namespace SimpleMCPBridge.Runtime
         private readonly Dictionary<string, ToolEntry> _tools = new();
 
         /// <summary>
-        /// Register a single [MCPTool] method (static or instance).
+        /// Register a single static [MCPTool] method.
         /// </summary>
-        private void RegisterMethod(MethodInfo method, string name, string description, object instance = null)
+        private void RegisterMethod(MethodInfo method, string name, string description)
         {
             // Validate: (string) -> string
             var parameters = method.GetParameters();
             if (parameters.Length != 1 || parameters[0].ParameterType != typeof(string))
             {
-                UnityEngine.Debug.LogWarning(
+                DebugUtils.LogWarning(
                     $"[MCPToolRegistry] Skipping '{method.DeclaringType?.Name}.{method.Name}': must accept a single string parameter.");
                 return;
             }
             if (method.ReturnType != typeof(string))
             {
-                UnityEngine.Debug.LogWarning(
+                DebugUtils.LogWarning(
                     $"[MCPToolRegistry] Skipping '{method.DeclaringType?.Name}.{method.Name}': must return string.");
                 return;
             }
 
             if (_tools.ContainsKey(name))
             {
-                UnityEngine.Debug.LogWarning(
+                DebugUtils.LogWarning(
                     $"[MCPToolRegistry] Duplicate tool name '{name}' from '{method.DeclaringType?.Name}.{method.Name}' — keeping first registration.");
                 return;
             }
 
-            var del = instance != null
-                ? (Func<string, string>)method.CreateDelegate(typeof(Func<string, string>), instance)
-                : (Func<string, string>)method.CreateDelegate(typeof(Func<string, string>));
+            var del = (Func<string, string>)method.CreateDelegate(typeof(Func<string, string>));
 
             _tools[name] = new ToolEntry(name, description, del);
-            UnityEngine.Debug.Log($"[MCPToolRegistry] Registered '{method.DeclaringType?.Name}.{method.Name}' as '{name}'");
+            DebugUtils.Log($"[MCPToolRegistry] Registered '{method.DeclaringType?.Name}.{method.Name}' as '{name}'");
         }
 
         /// <summary>
-        /// Auto-discover all [MCPTool] handlers (static and instance methods) in all loaded assemblies.
-        /// Static handlers need no instantiation; instance handlers (if any) require a parameterless constructor.
+        /// Auto-discover all [MCPTool] static handlers in all loaded assemblies.
+        /// All MCPTool methods are expected to be public static (string → string).
         /// </summary>
         public void AutoRegisterAll()
         {
@@ -80,30 +78,11 @@ namespace SimpleMCPBridge.Runtime
                 {
                     if (type.IsAbstract || type.IsInterface) continue;
 
-                    // ── Static methods ──
                     foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy))
                     {
                         var attr = method.GetCustomAttribute<MCPToolAttribute>();
                         if (attr == null) continue;
                         RegisterMethod(method, attr.Name, attr.Description);
-                    }
-
-                    // ── Instance methods (needs parameterless ctor) ──
-                    var ctor = type.GetConstructor(Type.EmptyTypes);
-                    if (ctor == null) continue;
-
-                    foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance))
-                    {
-                        var attr = method.GetCustomAttribute<MCPToolAttribute>();
-                        if (attr == null) continue;
-
-                        try
-                        {
-                            var instance = Activator.CreateInstance(type);
-                            RegisterMethod(method, attr.Name, attr.Description, instance);
-                        }
-                        catch { }
-                        break;
                     }
                 }
             }

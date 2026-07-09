@@ -163,7 +163,7 @@ namespace SimpleMCPBridge.Runtime
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AIRequest] Ask failed: {ex.Message}");
+                DebugUtils.LogWarning($"[AIRequest] Ask failed: {ex.Message}");
                 OnResponseReceived?.Invoke(null);
             }
         }

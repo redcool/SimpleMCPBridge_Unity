@@ -36,15 +36,28 @@ namespace SimpleMCPBridge.Runtime
         private float _lastAttemptTime;
 
         // ── Unity lifecycle ──
-
+        public bool dontDestroyOnLoad = true;
+        public bool isAutoReconnect = true;
         private void Awake()
         {
-            LoadConfig();
+            if (Application.isPlaying)
+            {
+                if (dontDestroyOnLoad)
+                    DontDestroyOnLoad(gameObject);
+            }
+
+            BridgeConfig.LoadConfig(out _serverIp, out _serverPort);
             // Reuse or create the shared default bridge
             _bridge = MCPBridge.Default ??= new MCPBridge();
+            _bridge.IsAutoReconnect = isAutoReconnect;
+
             Runtime.AIRequest.Register(_bridge);
 
 #if UNITY_EDITOR
+            CompilationPipeline.compilationStarted -= OnCompilationStarted;
+            CompilationPipeline.compilationFinished -= OnCompilationFinished;
+            EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
+
             CompilationPipeline.compilationStarted += OnCompilationStarted;
             CompilationPipeline.compilationFinished += OnCompilationFinished;
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
@@ -58,7 +71,14 @@ namespace SimpleMCPBridge.Runtime
 
         private void Update()
         {
-            if (_bridge == null) return;
+            if (_bridge == null)
+            {
+                Awake(); // Recreate bridge if somehow destroyed
+                return;
+            }
+
+            // Sync inspector toggle to bridge (survives until next domain reload)
+            _bridge.IsAutoReconnect = isAutoReconnect;
 
             // Drain the bridge's main-thread queue every frame
             _bridge.DrainQueue();
@@ -129,35 +149,5 @@ namespace SimpleMCPBridge.Runtime
         }
 #endif
 
-        // ── Config ──
-
-        private void LoadConfig()
-        {
-            var configPath = Path.Combine(Application.dataPath, "SimpleMCPBridge", "bridge-config.json");
-            try
-            {
-                if (File.Exists(configPath))
-                {
-                    var json = File.ReadAllText(configPath);
-                    var config = JsonUtility.FromJson<BridgeConfig>(json);
-                    if (config != null)
-                    {
-                        _serverIp = string.IsNullOrEmpty(config.serverIp) ? _serverIp : config.serverIp;
-                        _serverPort = config.serverPort > 0 ? _serverPort : _serverPort;
-                    }
-                }
-            }
-            catch (System.Exception ex)
-            {
-                Debug.LogWarning($"[AutoStartBridge] Failed to read bridge-config.json: {ex.Message}");
-            }
-        }
-
-        [System.Serializable]
-        private class BridgeConfig
-        {
-            public string serverIp = "127.0.0.1";
-            public int serverPort = 45678;
-        }
     }
 }
