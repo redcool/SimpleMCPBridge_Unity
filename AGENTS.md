@@ -54,12 +54,15 @@ server keeps only the most recent one.
 - **Server stderr:** `SimpleMcpServer/server.err`
 - **Unity Editor log:** `$env:LOCALAPPDATA\Unity\Editor\Editor.log`
 
-## Tools (20)
+## Tools (23)
 
 | Tool | What it does |
 |------|-------------|
 | `scene.get_hierarchy` | Scene tree (root→children, with components + positions) |
 | `scene.get_objects` | Filtered list by nameContains |
+| `scene.get_objects_by_type` | Objects with a component type (+ optional nameContains/layer/layerName/isIncludeInvisible) |
+| `scene.get_objects_by_tag` | Objects with a tag (+ optional nameContains/layer/layerName) |
+| `scene.get_objects_by_path` | Object at Transform path (+ optional nameContains/layer/layerName) |
 | `scene.create_object` | New GameObject with optional position/rotation/scale/parentId |
 | `scene.delete_object` | Destroy by instanceId |
 | `scene.set_transform` | Set position/rotation/scale by instanceId |

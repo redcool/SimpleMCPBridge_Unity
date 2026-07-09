@@ -102,7 +102,6 @@ namespace SimpleMCPBridge.Runtime
         public void ConnectToServer(string host, int port)
         {
             if (IsConnected) return;
-            if (_client != null && _client.IsConnecting) return;
 
             Host = host;
             Port = port;
@@ -110,8 +109,12 @@ namespace SimpleMCPBridge.Runtime
             Log($"ConnectToServer({host}:{port})");
 
             _router = new MessageRouter();
-            // Disconnect any previous client to avoid leaking connections
-            _client?.Disconnect();
+            // Force-clean any previous client (even stuck-connecting ones)
+            if (_client != null)
+            {
+                try { _client.Disconnect(); } catch { }
+                _client = null;
+            }
             _client = new NetWebSocketClient();
 
             _client.OnMessageReceived += (message) =>

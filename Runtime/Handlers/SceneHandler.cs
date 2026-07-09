@@ -1,3 +1,4 @@
+using SimpleMCPBridge;
 using SimpleMCPBridge.Runtime;
 using SimpleMCPBridge.Runtime.Models;
 using System;
@@ -35,7 +36,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             return JsonHelper.BuildJsonArray(entries.ToArray());
         }
 
-        private static string BuildTreeEntry(GameObject go, string path)
+        public static string BuildTreeEntry(GameObject go, string path)
         {
             // Collect component names
             var components = go.GetComponents<Component>();
@@ -65,12 +66,23 @@ namespace SimpleMCPBridge.Runtime.Handlers
             );
         }
 
-        [MCPTool(MCPMethodConst.GET_OBJECTS, "Find GameObjects in the scene by optional name filter — returns instanceId + path for each")]
+        [MCPTool(MCPMethodConst.GET_OBJECTS, "Find GameObjects in the scene by optional name filter — returns instanceId + path for each. " +
+            "If nameContains contains '/', it is treated as a transform path (e.g. 'Canvas/Button').")]
         public static string GetObjects(string paramsJson)
         {
             var filter = ParseJsonObject(paramsJson);
             filter.TryGetValue("nameContains", out var nameFilterObj);
             var nameFilter = nameFilterObj as string;
+
+            // If nameContains contains '/', treat it as a transform path
+            if (!string.IsNullOrEmpty(nameFilter) && nameFilter.Contains("/"))
+            {
+                var go = FindObjectByPath(nameFilter);
+                var pathRefs = new List<UnityObjectRef>();
+                if (go != null)
+                    pathRefs.Add(UnityObjectRef.FromGameObject(go));
+                return BuildObjectRefArrayJson(pathRefs);
+            }
 
             var allObjects = Object.FindObjectsByType<GameObject>(FindObjectsSortMode.None);
             var refs = new List<UnityObjectRef>();
@@ -83,7 +95,81 @@ namespace SimpleMCPBridge.Runtime.Handlers
                 refs.Add(UnityObjectRef.FromGameObject(go));
             }
 
-            // Build result JSON manually since JsonUtility can't do top-level arrays
+            return BuildObjectRefArrayJson(refs);
+        }
+
+        [MCPTool(MCPMethodConst.GET_OBJECTS_BY_TYPE, "Get all GameObjects in the scene that have a specific component type. " +
+            "Supports optional filters: nameContains, layer (int), layerName (string), isIncludeInvisible (bool, default true). " +
+            "Parameter 'typeName' accepts short type name (e.g. 'Button', 'Image', 'Renderer', 'Collider', 'Selectable').")]
+        public static string GetObjectsByType(string paramsJson)
+        {
+            var args = ParseJsonObject(paramsJson);
+            if (!args.TryGetValue("typeName", out var typeNameObj) || typeNameObj == null)
+                return JsonHelper.BuildJsonObject(("error", JsonHelper.EscapeString("Missing required parameter 'typeName'")));
+
+            var typeName = typeNameObj as string ?? "";
+            var targetType = ResolveComponentType(typeName);
+            if (targetType == null)
+                return JsonHelper.BuildJsonObject(
+                    ("error", JsonHelper.EscapeString($"Unknown component type: '{typeName}'")),
+                    ("hint", JsonHelper.EscapeString("Try 'Button', 'Image', 'Renderer', 'Collider', 'Selectable', 'Rigidbody', etc.")));
+
+            var includeInvisible = true;
+            if (args.TryGetValue("isIncludeInvisible", out var includeObj) && includeObj is bool b)
+                includeInvisible = b;
+
+            // Use SceneObjectTools.FindObjectsByType for efficient root-based scan
+            var scene = SceneManagement.SceneManager.GetActiveScene();
+            var goList = scene.FindObjectsByType(targetType, includeInvisible, null);
+            var refs = new List<UnityObjectRef>(goList.Count);
+
+            foreach (var go in goList)
+            {
+                if (FilterGameObject(go, args))
+                    refs.Add(UnityObjectRef.FromGameObject(go));
+            }
+
+            return BuildObjectRefArrayJson(refs);
+        }
+
+        [MCPTool(MCPMethodConst.GET_OBJECTS_BY_TAG, "Get all GameObjects in the scene with a specific tag. " +
+            "Supports optional filters: nameContains, layer (int), layerName (string).")]
+        public static string GetObjectsByTag(string paramsJson)
+        {
+            var args = ParseJsonObject(paramsJson);
+            if (!args.TryGetValue("tag", out var tagObj) || tagObj == null)
+                return JsonHelper.BuildJsonObject(("error", JsonHelper.EscapeString("Missing required parameter 'tag'")));
+
+            var tag = tagObj as string ?? "";
+            var allObjects = GameObject.FindGameObjectsWithTag(tag);
+            var refs = new List<UnityObjectRef>();
+
+            foreach (var go in allObjects)
+            {
+                if (FilterGameObject(go, args))
+                    refs.Add(UnityObjectRef.FromGameObject(go));
+            }
+
+            return BuildObjectRefArrayJson(refs);
+        }
+
+        [MCPTool(MCPMethodConst.GET_OBJECTS_BY_PATH, "Get a GameObject by its Transform path (e.g. 'Canvas/Panel/Button'). " +
+            "Supports optional filters: nameContains, layer (int), layerName (string).")]
+        public static string GetObjectsByPath(string paramsJson)
+        {
+            var args = ParseJsonObject(paramsJson);
+            if (!args.TryGetValue("path", out var pathObj) || pathObj == null)
+                return JsonHelper.BuildJsonObject(("error", JsonHelper.EscapeString("Missing required parameter 'path'")));
+
+            var path = pathObj as string ?? "";
+            var go = FindObjectByPath(path);
+            if (go == null)
+                return JsonHelper.BuildJsonObject(("error", JsonHelper.EscapeString($"No GameObject found at path: '{path}'")));
+
+            if (!FilterGameObject(go, args))
+                return BuildObjectRefArrayJson(new List<UnityObjectRef>());
+
+            var refs = new List<UnityObjectRef> { UnityObjectRef.FromGameObject(go) };
             return BuildObjectRefArrayJson(refs);
         }
 
@@ -126,7 +212,8 @@ namespace SimpleMCPBridge.Runtime.Handlers
             return JsonHelper.BuildJsonObject(("success", "true"));
         }
 
-        [MCPTool(MCPMethodConst.SET_TRANSFORM, "Set position, rotation, and/or scale of a GameObject by instanceId or path")]
+        [MCPTool(MCPMethodConst.SET_TRANSFORM, "Set position, rotation, and/or scale of a GameObject by instanceId or path. " +
+            "Optional 'space' parameter: 'world' (default, transform.position) or 'local' (transform.localPosition).")]
         public static string SetTransform(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
@@ -137,12 +224,22 @@ namespace SimpleMCPBridge.Runtime.Handlers
             var posArr = GetOptionalFloatArray(args, "position");
             var rotArr = GetOptionalFloatArray(args, "rotation");
             var scaleArr = GetOptionalFloatArray(args, "scale");
+            var space = GetString(args, "space", "world").ToLowerInvariant();
+            var isLocal = space == "local";
 
             UndoRecord(go.transform, "Set Transform");
             if (posArr != null && posArr.Length >= 3)
-                go.transform.position = new Vector3(posArr[0], posArr[1], posArr[2]);
+            {
+                var pos = new Vector3(posArr[0], posArr[1], posArr[2]);
+                if (isLocal) go.transform.localPosition = pos;
+                else go.transform.position = pos;
+            }
             if (rotArr != null && rotArr.Length >= 3)
-                go.transform.rotation = Quaternion.Euler(rotArr[0], rotArr[1], rotArr[2]);
+            {
+                var rot = Quaternion.Euler(rotArr[0], rotArr[1], rotArr[2]);
+                if (isLocal) go.transform.localRotation = rot;
+                else go.transform.rotation = rot;
+            }
             if (scaleArr != null && scaleArr.Length >= 3)
                 go.transform.localScale = new Vector3(scaleArr[0], scaleArr[1], scaleArr[2]);
 
@@ -442,7 +539,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         /// Resolve a GameObject from tool arguments.
         /// Priority: instanceId (precise) → path (domain-reload safe).
         /// </summary>
-        private static GameObject ResolveTarget(Dictionary<string, object> args)
+        public static GameObject ResolveTarget(Dictionary<string, object> args)
         {
             // Try instanceId first (fast scan, survives renames/moves)
             var instanceId = GetOptionalInt(args, "instanceId");
@@ -467,7 +564,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         /// Priority: parentId → parentPath.
         /// Returns null if no parent specified (meaning "unparent to root").
         /// </summary>
-        private static GameObject ResolveParentTarget(Dictionary<string, object> args)
+        public static GameObject ResolveParentTarget(Dictionary<string, object> args)
         {
             var parentId = GetOptionalInt(args, "parentId");
             if (parentId.HasValue && parentId.Value != 0)
@@ -485,7 +582,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             return null;
         }
 
-        private static GameObject FindObjectById(int instanceId)
+        public static GameObject FindObjectById(int instanceId)
         {
             // We can't do a direct lookup by instanceId, so we scan.
             // For large scenes this is slow, but acceptable for Phase 1.
@@ -501,32 +598,27 @@ namespace SimpleMCPBridge.Runtime.Handlers
 
         /// <summary>
         /// Find a GameObject by its transform path (e.g. "Canvas/Panel/Button").
-        /// Walks root objects + Transform.Find for the remaining segments.
+        /// Delegates to SceneObjectTools for multi-segment paths.
         /// Inactive objects ARE included (root objects include all).
         /// </summary>
-        private static GameObject FindObjectByPath(string path)
+        public static GameObject FindObjectByPath(string path)
         {
             if (string.IsNullOrEmpty(path)) return null;
-            var parts = path.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length == 0) return null;
-
-            // Match root name first
-            var roots = SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
-            foreach (var root in roots)
+            if (!path.Contains("/"))
             {
-                if (root.name == parts[0])
-                {
-                    if (parts.Length == 1) return root;
-                    // Navigate remaining path via Transform.Find
-                    var remainingPath = string.Join("/", parts, 1, parts.Length - 1);
-                    var t = root.transform.Find(remainingPath);
-                    if (t != null) return t.gameObject;
-                }
+                // Single-segment: search root objects by name
+                var roots = SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
+                foreach (var root in roots)
+                    if (root.name == path) return root;
+                return null;
             }
-            return null;
+            // Multi-segment: delegate to SceneObjectTools (returns Transform, unwrap .gameObject)
+            var scene = SceneManagement.SceneManager.GetActiveScene();
+            var result = scene.FindObjectByPath(path) as Transform;
+            return result != null ? result.gameObject : null;
         }
 
-        private static Component FindComponentByTypeName(GameObject go, string typeName)
+        public static Component FindComponentByTypeName(GameObject go, string typeName)
         {
             var components = go.GetComponents<Component>();
             foreach (var comp in components)
@@ -538,7 +630,35 @@ namespace SimpleMCPBridge.Runtime.Handlers
             return null;
         }
 
-        private static object ConvertValue(object rawValue, Type targetType)
+        // Ordered: first match wins. Try without assembly first, then with CoreModule,
+        // then common Unity modules for types like Collider (PhysicsModule), etc.
+        public static readonly string[] s_tns = {
+            "UnityEngine.", "UnityEngine.", "UnityEngine.UI.", "UnityEngine.EventSystems.",
+            "TMPro.",       "UnityEngine.", "UnityEngine.",    "UnityEngine.",
+        };
+        public static readonly string[] s_tas = {
+            null,            "UnityEngine.CoreModule", "UnityEngine.UI",  "UnityEngine.UI",
+            "Unity.TextMeshPro", "UnityEngine.PhysicsModule", "UnityEngine.Physics2DModule", "UnityEngine.AnimationModule",
+        };
+
+        public static Type ResolveComponentType(string typeName)
+        {
+            if (string.IsNullOrEmpty(typeName)) return null;
+
+            for (int i = 0; i < s_tns.Length; i++)
+            {
+                var fullName = s_tns[i] + typeName;
+                var asmName = s_tas[i];
+                var type = asmName != null
+                    ? Type.GetType(fullName + "," + asmName, false, true)
+                    : Type.GetType(fullName, false, true);
+                if (type != null && type.IsSubclassOf(typeof(Component))) return type;
+            }
+
+            return null;
+        }
+
+        public static object ConvertValue(object rawValue, Type targetType)
         {
             if (rawValue == null)
                 return targetType.IsValueType ? Activator.CreateInstance(targetType) : null;
@@ -596,21 +716,21 @@ namespace SimpleMCPBridge.Runtime.Handlers
         //  Undo helpers (no-op outside Editor)
         // ──────────────────────────────────────────────
 
-        private static void UndoRecord(Object target, string label)
+        public static void UndoRecord(Object target, string label)
         {
 #if UNITY_EDITOR
             UnityEditor.Undo.RecordObject(target, $"[MCP] {label}");
 #endif
         }
 
-        private static void UndoRegisterCreated(GameObject go, string label)
+        public static void UndoRegisterCreated(GameObject go, string label)
         {
 #if UNITY_EDITOR
             UnityEditor.Undo.RegisterCreatedObjectUndo(go, $"[MCP] {label}");
 #endif
         }
 
-        private static void UndoDestroyObject(GameObject go)
+        public static void UndoDestroyObject(GameObject go)
         {
 #if UNITY_EDITOR
             UnityEditor.Undo.DestroyObjectImmediate(go);
@@ -619,7 +739,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
 #endif
         }
 
-        private static Component UndoAddComponent(GameObject go, Type type)
+        public static Component UndoAddComponent(GameObject go, Type type)
         {
 #if UNITY_EDITOR
             return UnityEditor.Undo.AddComponent(go, type);

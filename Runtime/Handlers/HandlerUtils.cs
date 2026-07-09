@@ -181,5 +181,43 @@ namespace SimpleMCPBridge.Runtime.Handlers
                 ("error", JsonHelper.EscapeString(message))
             );
         }
+
+        // ── GameObject filters (shared by scene.get_objects_by_* tools) ──
+
+        /// <summary>
+        /// Apply common filters (nameContains, layer, layerName) to a candidate GameObject.
+        /// Returns true if the object passes all filters (i.e. should be included).
+        /// </summary>
+        public static bool FilterGameObject(GameObject go, Dictionary<string, object> args)
+        {
+            // nameContains
+            if (args.TryGetValue("nameContains", out var nameObj) && nameObj is string nameFilter && !string.IsNullOrEmpty(nameFilter))
+            {
+                if (!go.name.Contains(nameFilter, StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
+
+            // layer (int, 0-31) — higher priority than layerName
+            if (args.TryGetValue("layer", out var layerObj) && layerObj != null)
+            {
+                int layerInt;
+                if (layerObj is int i) layerInt = i;
+                else if (layerObj is long l) layerInt = (int)l;
+                else if (layerObj is double d) layerInt = (int)d;
+                else if (layerObj is string s && int.TryParse(s, out var pi)) layerInt = pi;
+                else return false; // invalid layer value
+
+                if (go.layer != layerInt) return false;
+            }
+
+            // layerName — skip if layer already filtered
+            if (args.TryGetValue("layerName", out var layerNameObj) && layerNameObj is string layerNameFilter && !string.IsNullOrEmpty(layerNameFilter))
+            {
+                if (!LayerMask.LayerToName(go.layer).Equals(layerNameFilter, StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
+
+            return true;
+        }
     }
 }

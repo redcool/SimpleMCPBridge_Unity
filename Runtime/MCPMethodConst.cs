@@ -15,6 +15,12 @@ namespace SimpleMCPBridge.Runtime
         public const string GET_HIERARCHY = "scene.get_hierarchy";
         /// <summary>获取 GameObject 的所有组件列表。</summary>
         public const string GET_COMPONENTS = "scene.get_components";
+        /// <summary>按组件类型获取场景内所有对象（支持 nameContains/layer/layerName 过滤）。</summary>
+        public const string GET_OBJECTS_BY_TYPE = "scene.get_objects_by_type";
+        /// <summary>按标签查找对象（支持 nameContains/layer/layerName 过滤）。</summary>
+        public const string GET_OBJECTS_BY_TAG = "scene.get_objects_by_tag";
+        /// <summary>按 Transform 路径查找对象（支持 nameContains/layer/layerName 过滤）。</summary>
+        public const string GET_OBJECTS_BY_PATH = "scene.get_objects_by_path";
         /// <summary>按名称过滤查找对象。</summary>
         public const string GET_OBJECTS = "scene.get_objects";
         /// <summary>创建 GameObject。</summary>
