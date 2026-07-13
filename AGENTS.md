@@ -54,7 +54,7 @@ server keeps only the most recent one.
 - **Server stderr:** `SimpleMcpServer/server.err`
 - **Unity Editor log:** `$env:LOCALAPPDATA\Unity\Editor\Editor.log`
 
-## Tools (23)
+## Tools (26)
 
 | Tool | What it does |
 |------|-------------|
@@ -79,6 +79,9 @@ server keeps only the most recent one.
 | `scene.set_material` ⚠ | Set material color/texture on Renderer. For asset-level material edits, prefer editing `.meta` GUIDs via filesystem |
 | `scene.enter_play_mode` | Enter Play Mode (Editor only) |
 | `scene.exit_play_mode` | Exit Play Mode (Editor only) |
+| `recording.start` | Start recording gameplay via VideoKit (Play Mode only). Params: width/height/fps/videoBitRate/enableAudio/keyframeInterval |
+| `recording.stop` | Stop recording and export to MP4 (async, poll status for completion via recording.status) |
+| `recording.status` | Get current recording/export state — returns isRecording/elapsedSeconds/completed filePath |
 | `scene.pause_play_mode` | Pause/resume Play Mode — `paused: true/false` (Editor only) |
 | `editor.request_compile` | Trigger Unity script recompilation (after editing C# via filesystem) (Editor only) |
 
@@ -152,7 +155,8 @@ instance — the bridge must reconnect to the new one.
 | `Runtime/WebSocketClient.cs` | Raw TCP WS client, frame read/write, HTTP upgrade |
 | `Runtime/MessageRouter.cs` | Routes tool calls to handlers |
 | `Runtime/MCPToolRegistry.cs` | Scans for [MCPTool] methods |
-| `Runtime/Handlers/SceneHandler.cs` | The 6 tool implementations |
+| `Runtime/Handlers/SceneHandler.cs` | Scene inspection + manipulation tools |
+| `Runtime/Handlers/RecordingHandler.cs` | Gameplay recording tools (VideoKit) |
 | `Editor/MCPBridgeWindow.cs` | Tools > SimpleMCPBridge window |
 | `Editor/AutoStartBridge.cs` | Auto-connect on domain reload |
 | `bridge-config.json` | Bridge IP/port |

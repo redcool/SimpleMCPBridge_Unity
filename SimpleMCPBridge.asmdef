@@ -3,7 +3,8 @@
     "rootNamespace": "",
     "references": [
         "PowerUtilities",
-        "Unity.InputSystem"
+        "Unity.InputSystem",
+        "FFmpegUnityBind2"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

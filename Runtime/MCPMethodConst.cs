@@ -75,5 +75,13 @@ namespace SimpleMCPBridge.Runtime
         public const string CLICK_SCREEN = "input.click_screen";
         /// <summary>在屏幕指定位置模拟鼠标点击（通过 Input System 低层级事件队列）。</summary>
         public const string MOUSE_CLICK = "input.mouse_click";
+
+        // ── 录制工具 ──
+        /// <summary>开始录制游戏画面。</summary>
+        public const string START_RECORDING = "recording.start";
+        /// <summary>停止录制并导出 MP4 文件。</summary>
+        public const string STOP_RECORDING = "recording.stop";
+        /// <summary>获取当前录制状态。</summary>
+        public const string GET_RECORDING_STATUS = "recording.status";
     }
 }

@@ -139,13 +139,9 @@ namespace SimpleMCPBridge.Runtime
             if (status == null) return;
             _bridge?.SendIfConnected($"{{\"type\":\"playmode\",\"status\":\"{status}\"}}");
 
-            // Disconnect bridge BEFORE domain reload so the old WebSocket
-            // connection is properly closed and doesn't leak thread pool threads.
-            if (state == PlayModeStateChange.ExitingPlayMode ||
-                state == PlayModeStateChange.ExitingEditMode)
-            {
-                _bridge?.Disconnect();
-            }
+            // Bridge disconnect is NOT done here — it would close the WebSocket
+            // before the ExitPlayMode JSON-RPC response can be sent.
+            // DomainUnload (during domain reload) handles cleanup.
         }
 #endif
 

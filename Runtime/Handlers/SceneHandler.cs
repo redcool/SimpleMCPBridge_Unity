@@ -487,7 +487,13 @@ namespace SimpleMCPBridge.Runtime.Handlers
         [MCPTool(MCPMethodConst.EXIT_PLAY_MODE, "Exit Play Mode in the Unity Editor")]
         public static string ExitPlayMode(string paramsJson)
         {
-            UnityEditor.EditorApplication.isPlaying = false;
+            // Defer exit so the JSON-RPC response is sent via WebSocket
+            // before OnPlayModeStateChanged(ExitingPlayMode) fires and
+            // potentially disconnects the bridge.
+            UnityEditor.EditorApplication.delayCall += () =>
+            {
+                UnityEditor.EditorApplication.isPlaying = false;
+            };
             return JsonHelper.BuildJsonObject(("success", "true"));
         }
 

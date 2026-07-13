@@ -49,8 +49,8 @@ namespace SimpleMCPBridge
 
         /// <summary>
         /// Static constructor: fires on every domain reload.
-        /// Only subscribes safety-net cleanup events (Editor quit, domain unload).
-        /// Active events (update, playModeStateChanged) are subscribed by Start().
+        /// Subscribes update loop, play mode change, and safety-net cleanup.
+        /// Also auto-activates the bridge so tools work without user clicking Connect.
         /// </summary>
         static MCPBridgeWindow()
         {
@@ -58,17 +58,39 @@ namespace SimpleMCPBridge
             EditorApplication.quitting -= OnEditorQuit;
             EditorApplication.quitting += OnEditorQuit;
             AppDomain.CurrentDomain.DomainUnload += CurrentDomain_DomainUnload;
+
+            // Subscribe StaticUpdate on every domain reload.
+            // StaticUpdate itself guards with s_activated (EditorPrefs), so it
+            // is a no-op until activation is set (see delayCall below).
+            EditorApplication.update -= StaticUpdate;
+            EditorApplication.update += StaticUpdate;
+            s_updateSubscribed = true;
+
+            // Auto-activate bridge on domain reload (deferred to let scene load).
+            // This sets s_activated = true and disables any scene AutoStartBridge
+            // so only StaticUpdate drains the queue in both Edit and Play Mode.
+            EditorApplication.delayCall += () =>
+            {
+                // If an AutoStartBridge scene object exists, disable it to avoid
+                // duplicate DrainQueue calls (AutoStartBridge.Update + StaticUpdate).
+                var autoBridge = UnityEngine.Object.FindObjectOfType<AutoStartBridge>();
+                if (autoBridge != null)
+                    autoBridge.gameObject.SetActive(false);
+
+                if (MCPBridge.Default != null)
+                    MCPBridge.Default.IsAutoReconnect = true;
+                s_activated = true;
+            };
         }
 
         /// <summary>
-        /// Start the bridge management loop: subscribe active editor events,
-        /// disable scene AutoStartBridge to prevent competing reconnect loops.
+        /// Activate bridge management: set s_activated, disable scene AutoStartBridge.
+        /// Safe to call multiple times (subscriptions use -= before += pattern).
         /// Called from ConnectToServer() when user clicks Connect.
+        /// Initial auto-activation happens in the static constructor via delayCall.
         /// </summary>
         public static void Start()
         {
-            if (s_updateSubscribed) return;
-
             // Disable AutoStartBridge scene object if present
             var autoBridge = UnityEngine.Object.FindObjectOfType<AutoStartBridge>();
             if (autoBridge != null)
@@ -121,11 +143,12 @@ namespace SimpleMCPBridge
         /// </summary>
         private static void OnPlayModeStateChanged(PlayModeStateChange state)
         {
-            if (state == PlayModeStateChange.ExitingPlayMode ||
-                state == PlayModeStateChange.ExitingEditMode)
-            {
-                MCPBridge.Default?.Disconnect();
-            }
+            // Note: we do NOT disconnect here. The ExitPlayMode tool handler
+            // defers EditorApplication.isPlaying = false via delayCall, so
+            // the JSON-RPC response is sent before this callback fires.
+            // Domain reload (if enabled) triggers CurrentDomain_DomainUnload
+            // which handles socket cleanup. Without domain reload, the bridge
+            // stays connected across play mode transitions — which is fine.
         }
 
         private static void CurrentDomain_DomainUnload(object sender, EventArgs e)
@@ -408,3 +431,4 @@ namespace SimpleMCPBridge
     }
 }
 #endif
+
