@@ -51,6 +51,7 @@ namespace SimpleMCPBridge.Runtime
         private NetworkStream _stream;
         private CancellationTokenSource _cts;
         private volatile bool _isConnected;
+        private volatile bool _disconnecting;
         private readonly SemaphoreSlim _sendLock = new(1, 1);
 
         // ── Unified receive buffer (solves TCP 粘包) ──
@@ -147,17 +148,18 @@ namespace SimpleMCPBridge.Runtime
 
         /// <summary>
         /// Disconnect and clean up.
-        /// Acquires the send lock before closing the TCP connection to prevent
-        /// mid-write kills — SendAsync may be in the middle of writing a frame
-        /// (header written, payload pending). Closing the socket between the two
-        /// WriteAsync calls leaves a partial frame that the server can't parse.
+        /// Sets _disconnecting first so in-flight SendAsync aborts early,
+        /// then waits briefly for the send lock to let any in-progress write
+        /// finish before closing the TCP socket. This prevents partial frames
+        /// (header written, payload not yet) from reaching the server.
         /// </summary>
         public void Disconnect()
         {
+            _disconnecting = true;
             _cts?.Cancel();
-            // Non-blocking: try to acquire send lock without waiting.
-            // If a send is in-flight, it will fail safely when the socket closes.
-            try { if (_sendLock.Wait(0)) _sendLock.Release(); } catch { }
+            // Wait briefly for in-flight send to finish (cooperative handover)
+            try { _sendLock.Wait(DisconnectTimeoutMs); } catch { }
+            try { _sendLock.Release(); } catch { }
             if (_tcpClient != null)
             {
                 try { _tcpClient.Close(); } catch { }
@@ -183,7 +185,7 @@ namespace SimpleMCPBridge.Runtime
             await _sendLock.WaitAsync();
             try
             {
-                if (!_isConnected || _stream == null)
+                if (_disconnecting || !_isConnected || _stream == null)
                     throw new InvalidOperationException("Not connected");
                 var payload = Encoding.UTF8.GetBytes(message);
                 await SendFrameAsync(TextOpcode, payload); // text frame, masked (client→server)

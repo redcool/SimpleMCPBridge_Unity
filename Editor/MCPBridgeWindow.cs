@@ -44,6 +44,9 @@ namespace SimpleMCPBridge
             set => EditorPrefs.SetBool(k_ActivatedKey, value);
         }
 
+        /// <summary>Public read-only: true when the bridge management loop is active.</summary>
+        public static bool IsBridgeActive => s_activated;
+
         /// <summary>Tracks whether EditorApplication.update is subscribed.</summary>
         private static bool s_updateSubscribed;
 
@@ -67,12 +70,11 @@ namespace SimpleMCPBridge
             s_updateSubscribed = true;
 
             // Auto-activate bridge on domain reload (deferred to let scene load).
-            // This sets s_activated = true and disables any scene AutoStartBridge
-            // so only StaticUpdate drains the queue in both Edit and Play Mode.
+            // If an AutoStartBridge scene object exists, disable it — in Editor,
+            // MCPBridgeWindow is the sole manager (StaticUpdate covers both modes).
+            // AutoStartBridge is intended for standalone builds only.
             EditorApplication.delayCall += () =>
             {
-                // If an AutoStartBridge scene object exists, disable it to avoid
-                // duplicate DrainQueue calls (AutoStartBridge.Update + StaticUpdate).
                 var autoBridge = UnityEngine.Object.FindObjectOfType<AutoStartBridge>();
                 if (autoBridge != null)
                     autoBridge.gameObject.SetActive(false);
@@ -91,7 +93,8 @@ namespace SimpleMCPBridge
         /// </summary>
         public static void Start()
         {
-            // Disable AutoStartBridge scene object if present
+            // Disable scene AutoStartBridge — MCPBridgeWindow manages the bridge in Editor.
+            // AutoStartBridge is intended for standalone builds only.
             var autoBridge = UnityEngine.Object.FindObjectOfType<AutoStartBridge>();
             if (autoBridge != null)
                 autoBridge.gameObject.SetActive(false);
@@ -106,7 +109,7 @@ namespace SimpleMCPBridge
             s_activated = true;
             s_updateSubscribed = true;
 
-            DebugUtils.Log("[MCPBridgeWindow] Started bridge management (AutoStartBridge disabled if present)");
+            DebugUtils.Log("[MCPBridgeWindow] Started bridge management");
         }
 
         /// <summary>
@@ -118,7 +121,7 @@ namespace SimpleMCPBridge
         {
             if (!s_updateSubscribed) return;
 
-            // Re-enable AutoStartBridge scene object
+            // Re-enable AutoStartBridge so it works in standalone builds.
             var autoBridge = UnityEngine.Object.FindObjectOfType<AutoStartBridge>(true);
             if (autoBridge != null)
                 autoBridge.gameObject.SetActive(true);
@@ -132,7 +135,7 @@ namespace SimpleMCPBridge
                 MCPBridge.Default.IsAutoReconnect = false;
             MCPBridge.Default?.Disconnect();
 
-            DebugUtils.Log("[MCPBridgeWindow] Stopped bridge management (AutoStartBridge re-enabled if present)");
+            DebugUtils.Log("[MCPBridgeWindow] Stopped bridge management");
         }
 
         /// <summary>
@@ -198,7 +201,7 @@ namespace SimpleMCPBridge
                 if (File.Exists(configPath))
                 {
                     var json = File.ReadAllText(configPath);
-                    var cfg = JsonUtility.FromJson<BridgeConfig>(json);
+                    var cfg = JsonUtility.FromJson<BridgeConfig.ConfigData>(json);
                     if (cfg != null)
                     {
                         s_serverIp = string.IsNullOrEmpty(cfg.serverIp) ? s_serverIp : cfg.serverIp;
@@ -420,7 +423,7 @@ namespace SimpleMCPBridge
             {
                 var dir = Path.GetDirectoryName(ConfigPath);
                 if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-                var cfg = new BridgeConfig { serverIp = s_serverIp, serverPort = s_serverPort };
+                var cfg = new BridgeConfig.ConfigData { serverIp = s_serverIp, serverPort = s_serverPort };
                 File.WriteAllText(ConfigPath, JsonUtility.ToJson(cfg, true));
             }
             catch (System.Exception ex)

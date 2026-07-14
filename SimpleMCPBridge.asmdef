@@ -4,7 +4,8 @@
     "references": [
         "PowerUtilities",
         "Unity.InputSystem",
-        "FFmpegUnityBind2"
+        "InstantReplay",
+        "UniEnc"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

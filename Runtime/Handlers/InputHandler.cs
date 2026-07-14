@@ -142,17 +142,5 @@ namespace SimpleMCPBridge.Runtime.Handlers
             return System.Convert.ToSingle(v, CultureInfo.InvariantCulture);
         }
 
-        private static string GetObjectPath(GameObject go)
-        {
-            var segments = new List<string>();
-            var t = go.transform;
-            while (t != null)
-            {
-                segments.Add(t.name);
-                t = t.parent;
-            }
-            segments.Reverse();
-            return string.Join("/", segments);
-        }
     }
 }

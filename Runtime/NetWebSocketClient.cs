@@ -111,30 +111,23 @@ namespace SimpleMCPBridge.Runtime
         // ── Disconnect / Cleanup ──
 
         /// <summary>
-        /// Disconnect from the server.
-        /// Performs a clean WebSocket close handshake before disposing.
+        /// Disconnect from the server immediately (non-blocking).
+        /// Disposes the WebSocket directly — no blocking close handshake.
+        /// The server will detect the dropped connection on its side.
         /// </summary>
         public void Disconnect()
         {
             _cts?.Cancel();
 
-            // Non-blocking send-lock drain: if a send is in-flight, let it finish on its own
+            // Non-blocking send-lock drain
             try { if (_sendLock.Wait(0)) _sendLock.Release(); } catch { }
 
             if (_ws != null)
             {
-                // Try clean close handshake (with timeout to avoid hang)
-                try
-                {
-                    if (_ws.State == WebSocketState.Open || _ws.State == WebSocketState.CloseReceived)
-                    {
-                        var closeCts = new CancellationTokenSource(DisconnectTimeoutMs);
-                        _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Disconnect", closeCts.Token)
-                           .ConfigureAwait(false).GetAwaiter().GetResult();
-                    }
-                }
-                catch { }
-
+                // Dispose sends TCP RST — instant non-blocking close.
+                // A clean close handshake via CloseAsync would block the
+                // calling thread for up to DisconnectTimeoutMs (5s), which
+                // would freeze the Editor if called from the main thread.
                 _ws.Dispose();
                 _ws = null;
             }

@@ -77,6 +77,9 @@ namespace SimpleMCPBridge.Runtime
                 foreach (var type in types)
                 {
                     if (type.IsAbstract || type.IsInterface) continue;
+                    // Skip types without [MCPToolClass] — this is the primary
+                    // performance gate that avoids scanning every type's methods.
+                    if (!type.IsDefined(typeof(MCPToolClassAttribute), inherit: false)) continue;
 
                     foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy))
                     {

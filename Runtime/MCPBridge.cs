@@ -259,7 +259,7 @@ namespace SimpleMCPBridge.Runtime
             Log("HANDLE MESSAGE");
 
             // ── Protocol: server requests tool list → we respond ──
-            if (rawMessage.Contains("\"request_tools\"") || rawMessage.Contains("'request_tools'"))
+            if (rawMessage.Contains("\"type\":\"request_tools\""))
             {
                 Log("  Server requested tool list — sending register_tools");
                 if (_router == null)
@@ -283,7 +283,7 @@ namespace SimpleMCPBridge.Runtime
             }
 
             // ── AI response from server ──
-            if (rawMessage.Contains("\"type\":\"ai_response\"") || rawMessage.Contains("\"type\":\"ai_response\""))
+            if (rawMessage.Contains("\"type\":\"ai_response\""))
             {
                 Log("  AI response received");
                 try

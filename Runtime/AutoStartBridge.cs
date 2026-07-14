@@ -46,6 +46,7 @@ namespace SimpleMCPBridge.Runtime
                     DontDestroyOnLoad(gameObject);
             }
 
+            BridgeConfig.EnsureConfigOnDevice();
             BridgeConfig.LoadConfig(out _serverIp, out _serverPort);
             // Reuse or create the shared default bridge
             _bridge = MCPBridge.Default ??= new MCPBridge();
@@ -71,6 +72,12 @@ namespace SimpleMCPBridge.Runtime
 
         private void Update()
         {
+#if UNITY_EDITOR
+            // In Editor, MCPBridgeWindow manages the bridge (static update loop).
+            // Skip if it's running — even if user manually re-enabled this component.
+            if (SimpleMCPBridge.MCPBridgeWindow.IsBridgeActive)
+                return;
+#endif
             if (_bridge == null)
             {
                 Awake(); // Recreate bridge if somehow destroyed

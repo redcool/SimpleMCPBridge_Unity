@@ -185,5 +185,5 @@ public class MyTools
 |------|------|
 | [SimpleMCPBridge](https://github.com/redcool/SimpleMCPBridge_Unity) | 本仓库 — Unity 桥接包 |
 | [SimpleMcpServer](https://github.com/redcool/SimpleMCPServer) | MCP Server — Node.js/TypeScript，处理 MCP 协议并转发请求到 Unity |
-
 两个仓库都需要 clone。分开管理避免耦合。
+| [InstantReplay](https://github.com/CyberAgentGameEntertainment/InstantReplay) | CyberAgent InstantReplay — OS原生硬编码，录制mp4 (替换FFmpegUnityBind2) |

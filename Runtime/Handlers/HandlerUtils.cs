@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using SimpleMCPBridge.Runtime.Models;
@@ -239,6 +239,23 @@ namespace SimpleMCPBridge.Runtime.Handlers
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// Build the transform path from scene root to this GameObject.
+        /// e.g. "Canvas/Panel/Button"
+        /// </summary>
+        public static string GetObjectPath(GameObject go)
+        {
+            var segments = new List<string>();
+            var t = go.transform;
+            while (t != null)
+            {
+                segments.Add(t.name);
+                t = t.parent;
+            }
+            segments.Reverse();
+            return string.Join("/", segments);
         }
     }
 }

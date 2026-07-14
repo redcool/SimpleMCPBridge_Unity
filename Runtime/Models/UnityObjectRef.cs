@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
+using static SimpleMCPBridge.Runtime.Handlers.HandlerUtils;
 
 namespace SimpleMCPBridge.Runtime.Models
 {
@@ -26,23 +27,6 @@ namespace SimpleMCPBridge.Runtime.Models
                 type = "GameObject",
                 path = GetObjectPath(go)
             };
-        }
-
-        /// <summary>
-        /// Build the transform path from scene root to this GameObject.
-        /// e.g. "Canvas/Panel/Button"
-        /// </summary>
-        private static string GetObjectPath(GameObject go)
-        {
-            var segments = new List<string>();
-            var t = go.transform;
-            while (t != null)
-            {
-                segments.Add(t.name);
-                t = t.parent;
-            }
-            segments.Reverse();
-            return string.Join("/", segments);
         }
     }
 }

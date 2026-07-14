@@ -25,6 +25,10 @@ namespace SimpleMCPBridge.Runtime.Handlers
     [MCPToolClass]
     public class SceneHandler
     {
+        /// <summary>
+        /// Cache for instanceId → GameObject lookups.
+        /// </summary>
+        private static readonly Dictionary<int, GameObject> s_instanceIdCache = new();
         [MCPTool(MCPMethodConst.GET_HIERARCHY, "Get the full scene hierarchy as a tree of objects with position, components, children, and transform path")]
         public static string GetHierarchy(string paramsJson)
         {
@@ -480,8 +484,16 @@ namespace SimpleMCPBridge.Runtime.Handlers
         [MCPTool(MCPMethodConst.ENTER_PLAY_MODE, "Enter Play Mode in the Unity Editor")]
         public static string EnterPlayMode(string paramsJson)
         {
-            UnityEditor.EditorApplication.isPlaying = true;
-            return JsonHelper.BuildJsonObject(("success", "true"));
+            var succeeded = UnityEditor.EditorApplication.isPlaying;
+            if (!succeeded)
+            {
+                UnityEditor.EditorApplication.isPlaying = true;
+                succeeded = UnityEditor.EditorApplication.isPlaying;
+            }
+            return JsonHelper.BuildJsonObject(
+                ("success", succeeded ? "true" : "false"),
+                ("isPlaying", succeeded ? "true" : "false")
+            );
         }
 
         [MCPTool(MCPMethodConst.EXIT_PLAY_MODE, "Exit Play Mode in the Unity Editor")]
@@ -509,6 +521,8 @@ namespace SimpleMCPBridge.Runtime.Handlers
         [MCPTool(MCPMethodConst.REQUEST_COMPILE, "Request Unity to recompile all scripts (useful after editing C# files externally via filesystem)")]
         public static string RequestCompile(string paramsJson)
         {
+            // Force reimport of changed scripts before requesting compilation
+            UnityEditor.AssetDatabase.Refresh();
             UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation();
             return JsonHelper.BuildJsonObject(("success", "true"));
         }
@@ -591,16 +605,21 @@ namespace SimpleMCPBridge.Runtime.Handlers
 
         public static GameObject FindObjectById(int instanceId)
         {
-            // We can't do a direct lookup by instanceId, so we scan.
-            // For large scenes this is slow, but acceptable for Phase 1.
+            // Fast path: check cache
+            if (s_instanceIdCache.TryGetValue(instanceId, out var go) && go != null)
+                return go;
+
+            // Cache miss (or stale entry from destroyed object) — full scan.
             // Must include inactive objects (e.g. after SetActive(false)).
+            s_instanceIdCache.Clear();
             var allObjects = Object.FindObjectsByType<GameObject>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-            foreach (var go in allObjects)
+            foreach (var obj in allObjects)
             {
-                if (go.GetInstanceID() == instanceId)
-                    return go;
+                s_instanceIdCache[obj.GetInstanceID()] = obj;
             }
-            return null;
+
+            s_instanceIdCache.TryGetValue(instanceId, out go);
+            return go;
         }
 
         /// <summary>

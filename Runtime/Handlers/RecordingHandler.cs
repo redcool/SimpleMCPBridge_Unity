@@ -2,254 +2,235 @@ using SimpleMCPBridge.Runtime;
 using SimpleMCPBridge.Runtime.Models;
 using System;
 using System.IO;
+using System.Threading.Tasks;
+using UniEnc;
 using UnityEngine;
-using FFmpegUnityBind2;
-using FFmpegUnityBind2.Components;
+using InstantReplay;
 using static SimpleMCPBridge.Runtime.Handlers.HandlerUtils;
 
 namespace SimpleMCPBridge.Runtime.Handlers
 {
     /// <summary>
-    /// Handles gameplay recording via FFmpegUnityBind2 (FFmpegREC).
-    /// Provides start/stop/status MCP tools for recording the scene from a dedicated Camera.
+    /// Handles gameplay recording via CyberAgent InstantReplay.
+    /// Uses ScreenshotFrameProvider (screen capture) and UnboundedRecordingSession
+    /// to produce MP4 files with OS-native hardware encoding (MediaCodec / Video Toolbox / Media Foundation).
     ///
-    /// Creates a hidden Camera that mirrors the Main Camera and captures frames
-    /// via FFmpegREC (OnPostRender). Audio (system) is optional.
     /// Encoding runs asynchronously — poll recording.status for completion.
+    /// No external ffmpeg binaries required on any platform.
     /// </summary>
     [MCPToolClass]
     public class RecordingHandler
     {
-        // Session state
-        private static GameObject _recorderGo;
-        private static Camera _recorderCamera;
-        private static FFmpegREC _recorder;
+        // ─── Session state ────────────────────────────────────────────────
+        private static UnboundedRecordingSession _session;
         private static string _outputPath;
         private static DateTime _startTime;
+
+        // ─── Export state (async) ─────────────────────────────────────────
+        private static Task _exportTask;
         private static string _lastExportPath;
         private static string _lastError;
-        private static bool _encodingSuccess;
-        private static bool _encodingFailed;
 
         private const string VIDEO_RECORD_DIR = "VideoRecord";
         private const int MAX_KEEP_FILES = 5;
 
-        /// <summary>
-        /// Start recording from a dedicated Camera mirroring the Main Camera.
-        /// Only works in Play Mode.
-        /// </summary>
+        // ─── recording.start ──────────────────────────────────────────────
+
         [MCPTool(MCPMethodConst.START_RECORDING,
-            "Start recording gameplay from a dedicated Camera matching the Main Camera. " +
-            "Only works in Play Mode. Optional params: width, height (0=current resolution), " +
-            "fps (default 30), enableAudio (default false), quality (CRF 0-51, default 23). " +
-            "Returns success, outputPath, width, height, fps.")]
+            "Start recording screen capture via CyberAgent InstantReplay (OS-native encoding). "
+            + "Only works in Play Mode. "
+            + "Params: width/height (default 1280x720), fps (default 30), "
+            + "enableAudio (default false), quality 1-100 (default 50). "
+            + "Returns success, outputPath, width, height, fps.")]
         public static string StartRecording(string paramsJson)
         {
             if (!Application.isPlaying)
                 return ErrorJson("Recording is only supported in Play Mode. Enter Play Mode first.");
 
-            if (_recorder != null && _recorder.State == FFmpegRECState.Capturing)
+            if (_session != null)
                 return ErrorJson("Already recording. Call recording.stop first.");
 
-            // Clean up any stale objects first (e.g. from previous Play Mode)
-            Cleanup();
+            // Clean up stale state (e.g. from previous Play Mode without domain reload)
+            ResetState();
 
             var args = ParseJsonObject(paramsJson);
-            int width = (int)GetOptionalInt(args, "width").GetValueOrDefault(0);
-            int height = (int)GetOptionalInt(args, "height").GetValueOrDefault(0);
+            int width = (int)GetOptionalInt(args, "width").GetValueOrDefault(1280);
+            int height = (int)GetOptionalInt(args, "height").GetValueOrDefault(720);
             int fps = (int)GetOptionalInt(args, "fps").GetValueOrDefault(30);
-            bool enableAudio = args.TryGetValue("enableAudio", out var audioVal) && (audioVal is bool b ? b : (bool.TryParse(audioVal?.ToString(), out var r) && r));
-            int quality = (int)GetOptionalInt(args, "quality").GetValueOrDefault(CRF.DEFAULT_QUALITY);
+            bool enableAudio = args.TryGetValue("enableAudio", out var audioVal) &&
+                (audioVal is bool b ? b : (bool.TryParse(audioVal?.ToString(), out var r) && r));
+            int quality = (int)GetOptionalInt(args, "quality").GetValueOrDefault(50);
 
             try
             {
-                // Build output path
+                // Ensure even resolution (encoder requirement for most codecs)
+                width = Mathf.Clamp(width % 2 == 0 ? width : width + 1, 320, 3840);
+                height = Mathf.Clamp(height % 2 == 0 ? height : height + 1, 240, 2160);
+
+                int bitrate = QualityToBitrate(quality);
+
+                var options = new RealtimeEncodingOptions
+                {
+                    VideoOptions = new VideoEncoderOptions
+                    {
+                        Width = (uint)Mathf.Clamp(width, 320, 3840),
+                        Height = (uint)Mathf.Clamp(height, 240, 2160),
+                        FpsHint = (uint)Mathf.Clamp(fps, 1, 120),
+                        Bitrate = (uint)bitrate
+                    },
+                    AudioOptions = new AudioEncoderOptions
+                    {
+                        SampleRate = 44100,
+                        Channels = 2,
+                        Bitrate = 128000
+                    },
+                    FixedFrameRate = Mathf.Clamp(fps, 1, 120),
+                    VideoInputQueueSize = 5,
+                    AudioInputQueueSizeSeconds = 1.0,
+                    MaxMemoryUsageBytesForCompressedFrames = 20L * 1024 * 1024,
+                    ForceReadback = false, // FreshFrameProvider gives unique textures per frame — no race
+                };
+
                 _outputPath = BuildOutputPath();
-                Directory.CreateDirectory(Path.GetDirectoryName(_outputPath));
+                Directory.CreateDirectory(Path.GetDirectoryName(_outputPath)!);
+
+                // Use FreshFrameProvider instead of ScreenshotFrameProvider to avoid
+                // RenderTexture reuse race — each frame gets its own texture.
+                _session = new UnboundedRecordingSession(
+                    _outputPath, options,
+                    frameProvider: new FreshFrameProvider(),
+                    disposeFrameProvider: true
+                );
 
                 _startTime = DateTime.UtcNow;
                 _lastError = null;
-                _encodingSuccess = false;
-                _encodingFailed = false;
+                _lastExportPath = null;
+                _exportTask = null;
 
-                // Create GameObject to hold recording components
-                _recorderGo = new GameObject("MCP Recording Camera");
-                // Position at main camera (or origin)
-                if (Camera.main != null)
-                {
-                    _recorderGo.transform.SetPositionAndRotation(
-                        Camera.main.transform.position,
-                        Camera.main.transform.rotation
-                    );
-                }
-                // Add Camera (required by FFmpegREC) — FFmpegREC will configure it in StartREC
-                _recorderCamera = _recorderGo.AddComponent<Camera>();
-                // Required audio components (required by [RequireComponent] on FFmpegREC)
-                _recorderGo.AddComponent<RecMicAudio>();
-                _recorderGo.AddComponent<RecSystemAudio>();
-
-                // Configure FFmpegREC
-                _recorder = _recorderGo.AddComponent<FFmpegREC>();
-                if (width > 0)
-                    _recorder.ResolutionWidth = width;
-                if (height > 0)
-                    _recorder.ResolutionHeight = height;
-                _recorder.TargetFPS = fps;
-                _recorder.AudioSource = enableAudio ? RecAudioSource.System : RecAudioSource.None;
-                _recorder.Quality = quality;
-
-                // Subscribe to completion events
-                _recorder.OnSuccessEvent += OnRecordingSuccess;
-                _recorder.OnFailEvent += OnRecordingFailed;
-
-                // Start capturing
-                _recorder.StartREC(_outputPath);
-
-                DebugUtils.Log($"[Recording] Started: {_outputPath} ({fps}fps, audio={enableAudio})");
+                DebugUtils.Log($"[Recording] Started: {_outputPath} ({width}x{height}, {fps}fps, audio={enableAudio}, quality={quality})");
 
                 return JsonHelper.BuildJsonObject(
                     ("success", "true"),
                     ("outputPath", JsonHelper.EscapeString(_outputPath)),
-                    ("width", width > 0 ? width.ToString() : "auto"),
-                    ("height", height > 0 ? height.ToString() : "auto"),
+                    ("width", width.ToString()),
+                    ("height", height.ToString()),
                     ("fps", fps.ToString()),
                     ("enableAudio", enableAudio ? "true" : "false")
                 );
             }
             catch (Exception ex)
             {
-                Cleanup();
+                CleanupSession();
                 _lastError = ex.Message;
                 return ErrorJson($"Failed to start recording: {ex.Message}");
             }
         }
 
-        /// <summary>
-        /// Stop recording and encode captured frames to MP4.
-        /// Encoding runs async — poll recording.status for completion.
-        /// </summary>
+        // ─── recording.stop ────────────────────────────────────────────────
+
         [MCPTool(MCPMethodConst.STOP_RECORDING,
-            "Stop recording and encode to MP4. " +
-            "Returns immediately with status='encoding'. " +
-            "Call recording.status to poll for completion and get the output file path.")]
+            "Stop recording and finalize the MP4. "
+            + "Returns immediately with status='encoding'. "
+            + "Poll recording.status for completion and output file path.")]
         public static string StopRecording(string paramsJson)
         {
-            // Idle with a completed export
-            if (_recorder == null || _recorder.State == FFmpegRECState.Idle)
+            // Already completed (previous export still stored)
+            if (_session == null)
             {
-                if (_encodingSuccess && !string.IsNullOrEmpty(_lastExportPath))
-                    return JsonHelper.BuildJsonObject(
-                        ("success", "true"),
-                        ("status", "\"completed\""),
-                        ("filePath", JsonHelper.EscapeString(_lastExportPath))
-                    );
-
+                if (!string.IsNullOrEmpty(_lastExportPath))
+                    return BuildCompletedJson(_lastExportPath);
+                if (!string.IsNullOrEmpty(_lastError))
+                    return BuildErrorJson(_lastError);
                 return ErrorJson("No active recording.");
             }
 
-            // Already encoding
-            if (_recorder.State == FFmpegRECState.Processing)
+            // Already in export
+            if (_exportTask != null)
+            {
                 return JsonHelper.BuildJsonObject(
                     ("success", "true"),
-                    ("status", "\"encoding\""),
+                    ("status", JsonHelper.EscapeString("encoding")),
                     ("message", JsonHelper.EscapeString("Already encoding previous recording."))
                 );
+            }
 
-            // State is Capturing — stop it
-            _recorder.StopREC();
+            // Start async export (fire-and-forget, poll via status)
+            _exportTask = ExportAsync();
+
             DebugUtils.Log("[Recording] Stopped, encoding to MP4...");
-
             return JsonHelper.BuildJsonObject(
                 ("success", "true"),
-                ("status", "\"encoding\""),
+                ("status", JsonHelper.EscapeString("encoding")),
                 ("message", JsonHelper.EscapeString("Recording stopped. Encoding to MP4..."))
             );
         }
 
-        /// <summary>
-        /// Get current recording/encoding status.
-        /// States: idle | recording | encoding | completed | error
-        /// </summary>
+        // ─── recording.status ──────────────────────────────────────────────
+
         [MCPTool(MCPMethodConst.GET_RECORDING_STATUS,
-            "Get current recording status. Returns state (idle/recording/encoding/completed/error), " +
-            "elapsed seconds, encoding progress (0-1), and output file path when complete.")]
+            "Get current recording/encoding status. "
+            + "States: idle | recording | encoding | completed | error.")]
         public static string GetStatus(string paramsJson)
         {
             var invariant = System.Globalization.CultureInfo.InvariantCulture;
 
-            // Stale state: recording objects survive Play Mode exit
-            if (_recorderGo != null && !Application.isPlaying)
+            // Stale state after exiting Play Mode (no domain reload)
+            if (!Application.isPlaying && _session != null)
             {
-                DebugUtils.Log("[Recording] Cleaning up stale recording objects from previous Play Mode.");
-                Cleanup();
+                DebugUtils.Log("[Recording] Cleaning up stale session from previous Play Mode.");
+                CleanupSession();
+                ResetState();
                 return JsonHelper.BuildJsonObject(
                     ("isRecording", "false"),
-                    ("state", "\"idle\"")
+                    ("state", JsonHelper.EscapeString("idle"))
                 );
             }
 
-            // Currently capturing frames
-            if (_recorder != null && _recorder.State == FFmpegRECState.Capturing)
+            // Currently recording
+            if (_session != null && _exportTask == null)
             {
                 float elapsed = (float)(DateTime.UtcNow - _startTime).TotalSeconds;
                 return JsonHelper.BuildJsonObject(
                     ("isRecording", "true"),
-                    ("state", "\"recording\""),
+                    ("state", JsonHelper.EscapeString("recording")),
                     ("elapsedSeconds", elapsed.ToString("F1", invariant))
                 );
             }
 
-            // Encoding in progress
-            if (_recorder != null && _recorder.State == FFmpegRECState.Processing)
+            // Export in progress
+            if (_exportTask != null && !_exportTask.IsCompleted)
             {
-                float progress = _recorder.WritingProgress;
                 return JsonHelper.BuildJsonObject(
                     ("isRecording", "false"),
-                    ("state", "\"encoding\""),
-                    ("progress", progress.ToString("F2", invariant))
+                    ("state", JsonHelper.EscapeString("encoding"))
                 );
             }
 
-            // Encoding completed (detected via OnSuccessEvent)
-            if (_encodingSuccess && !string.IsNullOrEmpty(_outputPath))
+            // Export just completed — consume result
+            if (_exportTask != null && _exportTask.IsCompleted)
             {
-                _lastExportPath = _outputPath;
-                _encodingSuccess = false; // report once
-                Cleanup();
+                _exportTask = null;
+                CleanupSession();
 
-                DebugUtils.Log($"[Recording] Exported: {_lastExportPath}");
+                if (!string.IsNullOrEmpty(_lastExportPath))
+                {
+                    var dir = Path.GetDirectoryName(_lastExportPath);
+                    if (!string.IsNullOrEmpty(dir))
+                        CleanupOldRecordings(dir, MAX_KEEP_FILES);
 
-                var dir = Path.GetDirectoryName(_lastExportPath);
-                if (!string.IsNullOrEmpty(dir))
-                    CleanupOldRecordings(dir, MAX_KEEP_FILES);
+                    DebugUtils.Log($"[Recording] Exported: {_lastExportPath}");
+                    return BuildCompletedJson(_lastExportPath);
+                }
 
-                return JsonHelper.BuildJsonObject(
-                    ("isRecording", "false"),
-                    ("state", "\"completed\""),
-                    ("filePath", JsonHelper.EscapeString(_lastExportPath)),
-                    ("message", JsonHelper.EscapeString("Recording exported successfully."))
-                );
-            }
-
-            // Encoding failed
-            if (_encodingFailed)
-            {
-                _encodingFailed = false; // report once
-                Cleanup();
-
-                return JsonHelper.BuildJsonObject(
-                    ("isRecording", "false"),
-                    ("state", "\"error\""),
-                    ("error", JsonHelper.EscapeString(_lastError ?? "Encoding failed"))
-                );
+                return BuildErrorJson(_lastError ?? "Recording failed with unknown error.");
             }
 
             // Idle with previous export
-            if (_lastExportPath != null)
+            if (!string.IsNullOrEmpty(_lastExportPath))
             {
                 return JsonHelper.BuildJsonObject(
                     ("isRecording", "false"),
-                    ("state", "\"idle\""),
+                    ("state", JsonHelper.EscapeString("idle")),
                     ("lastExportPath", JsonHelper.EscapeString(_lastExportPath))
                 );
             }
@@ -259,39 +240,72 @@ namespace SimpleMCPBridge.Runtime.Handlers
             {
                 return JsonHelper.BuildJsonObject(
                     ("isRecording", "false"),
-                    ("state", "\"error\""),
+                    ("state", JsonHelper.EscapeString("error")),
                     ("error", JsonHelper.EscapeString(_lastError))
                 );
             }
 
             return JsonHelper.BuildJsonObject(
                 ("isRecording", "false"),
-                ("state", "\"idle\"")
+                ("state", JsonHelper.EscapeString("idle"))
             );
         }
 
-        // ─── Event callbacks from FFmpegREC ───────────────────────────────
+        // ─── Async export ──────────────────────────────────────────────────
 
-        private static void OnRecordingSuccess(long executionId, FFmpegCallbacksHandlerBase handler)
+        /// <summary>
+        /// Completes the UnboundedRecordingSession and waits for the MP4 to be finalized.
+        /// Runs on the Unity main thread (via default SynchronizationContext capture).
+        /// Stores result in _lastExportPath / _lastError for polling by GetStatus.
+        /// </summary>
+        private static async Task ExportAsync()
         {
-            _encodingSuccess = true;
-            DebugUtils.Log($"[Recording] Encoding succeeded (execution: {executionId}). Output: {_outputPath}");
+            try
+            {
+                await _session.CompleteAsync();
+                _lastExportPath = _outputPath;
+                _lastError = null;
+            }
+            catch (Exception ex)
+            {
+                _lastError = $"Recording export failed: {ex.Message}";
+                _lastExportPath = null;
+                DebugUtils.LogError($"[Recording] {_lastError}");
+            }
         }
 
-        private static void OnRecordingFailed(long executionId, FFmpegCallbacksHandlerBase handler)
+        // ─── State reset (required for enter Play Mode without domain reload) ─
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetOnLoad()
         {
-            _encodingFailed = true;
-            _lastError = $"FFmpeg encoding failed (execution: {executionId})";
-            DebugUtils.LogError($"[Recording] {_lastError}");
+            ResetState();
+            // _session can't survive domain reload — Unity destroys it
+            _session = null;
         }
 
-        // ─── Helpers ──────────────────────────────────────────────────────
+        // ─── Helpers ───────────────────────────────────────────────────────
+
+        private static void ResetState()
+        {
+            _outputPath = null;
+            _startTime = default;
+            _lastExportPath = null;
+            _lastError = null;
+            _exportTask = null;
+        }
+
+        private static void CleanupSession()
+        {
+            _session?.Dispose();
+            _session = null;
+        }
 
         private static string BuildOutputPath()
         {
             string dir;
 #if UNITY_EDITOR || UNITY_STANDALONE
-            dir = Path.Combine(Path.GetDirectoryName(Application.dataPath), VIDEO_RECORD_DIR);
+            dir = Path.Combine(Path.GetDirectoryName(Application.dataPath)!, VIDEO_RECORD_DIR);
 #else
             dir = Path.Combine(Application.temporaryCachePath, VIDEO_RECORD_DIR);
 #endif
@@ -299,32 +313,37 @@ namespace SimpleMCPBridge.Runtime.Handlers
             return Path.Combine(dir, $"recording_{timestamp}.mp4");
         }
 
-        private static void Cleanup()
+        private static string BuildCompletedJson(string filePath)
         {
-            if (_recorder != null)
-            {
-                _recorder.OnSuccessEvent -= OnRecordingSuccess;
-                _recorder.OnFailEvent -= OnRecordingFailed;
-                _recorder = null;
-            }
+            return JsonHelper.BuildJsonObject(
+                ("isRecording", "false"),
+                ("state", JsonHelper.EscapeString("completed")),
+                ("filePath", JsonHelper.EscapeString(filePath)),
+                ("message", JsonHelper.EscapeString("Recording exported successfully."))
+            );
+        }
 
-            // Disable + null RT on camera before destroying so it doesn't
-            // render green (SolidColor) to the GameView on the next frame.
-            if (_recorderCamera != null)
-            {
-                _recorderCamera.enabled = false;
-                _recorderCamera.targetTexture = null;
-                _recorderCamera = null;
-            }
+        private static string BuildErrorJson(string error)
+        {
+            return JsonHelper.BuildJsonObject(
+                ("isRecording", "false"),
+                ("state", JsonHelper.EscapeString("error")),
+                ("error", JsonHelper.EscapeString(error))
+            );
+        }
 
-            if (_recorderGo != null)
-            {
-                if (Application.isPlaying)
-                    UnityEngine.Object.Destroy(_recorderGo);
-                else
-                    UnityEngine.Object.DestroyImmediate(_recorderGo);
-                _recorderGo = null;
-            }
+        /// <summary>
+        /// Maps quality (1-100) to video bitrate in bps.
+        /// Lower quality → lower bitrate → smaller file but worse image.
+        /// </summary>
+        private static int QualityToBitrate(int quality)
+        {
+            quality = Mathf.Clamp(quality, 1, 100);
+            if (quality >= 90) return 12000000; // 12 Mbps — very high
+            if (quality >= 75) return 8000000;  //  8 Mbps — high
+            if (quality >= 50) return 4000000;  //  4 Mbps — medium (default)
+            if (quality >= 25) return 2000000;  //  2 Mbps — low
+            return 1000000;                      //  1 Mbps — very low
         }
 
         private static void CleanupOldRecordings(string directory, int keepCount)
