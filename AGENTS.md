@@ -54,46 +54,56 @@ server keeps only the most recent one.
 - **Server stderr:** `SimpleMcpServer/server.err`
 - **Unity Editor log:** `$env:LOCALAPPDATA\Unity\Editor\Editor.log`
 
-## Tools (32)
+## Tools (46)
 
-| Tool | What it does |
-|------|-------------|
-| `scene.get_hierarchy` | Scene tree (root→children, with components + positions) |
-| `scene.get_objects` | Filtered list by nameContains |
-| `scene.get_objects_by_type` | Objects with a component type (+ optional nameContains/layer/layerName/isIncludeInvisible) |
-| `scene.get_objects_by_tag` | Objects with a tag (+ optional nameContains/layer/layerName) |
-| `scene.get_objects_by_path` | Object at Transform path (+ optional nameContains/layer/layerName) |
-| `scene.create_object` | New GameObject with optional position/rotation/scale/parentId |
-| `scene.delete_object` | Destroy by instanceId or path |
-| `scene.duplicate_object` | Duplicate a GameObject |
-| `scene.rename` | Rename a GameObject |
-| `scene.set_active` | Enable/disable a GameObject |
-| `scene.set_transform` | Set position/rotation/scale (world or local space) |
-| `scene.set_parent` | Set parent (omit parentId or 0 to unparent to root) |
-| `scene.set_component_property` | Set field/property on a component (supports Vector3, Color, enum, etc.) |
-| `scene.set_material` ⚠ | Set material color/texture on Renderer |
-| `scene.get_components` | List all components on a GameObject |
-| `scene.get_component_properties` | Get all serializable properties + current values of a component |
-| `scene.add_component` | Add component by type name (e.g. Rigidbody) |
-| `scene.remove_component` | Remove a component from a GameObject by type name |
-| `scene.instantiate_prefab` | Instantiate a prefab from project Assets (Editor only) |
-| `scene.save_current` | Save current scene (Editor only) |
-| `scene.enter_play_mode` | Enter Play Mode (Editor only) |
-| `scene.exit_play_mode` | Exit Play Mode (Editor only) |
-| `scene.pause_play_mode` | Pause/resume Play Mode (Editor only) |
-| `scene.get_play_mode` | Get current play mode state (Editor only) |
-| `physics.raycast` | Cast a ray and return first hit (point, normal, distance, collider info) |
-| `camera.screenshot` | Capture main camera view and save as PNG (Editor only) |
-| `asset.refresh` | Refresh Unity asset database |
-| `asset.find_assets` 🚫 | **DEPRECATED.** Use VS Code global search `*.meta` instead |
-| `asset.find_references` | Find all assets referencing a given asset |
-| `editor.request_compile` | Trigger Unity script recompilation (Editor only) |
-| `editor.open_window` | Open a Unity Editor window by menu path (Editor only) |
-| `input.click_screen` | Simulate click at normalized screen position (EventSystem path) |
-| `input.mouse_click` | Simulate mouse click at normalized screen position (Input System path) |
-| `recording.start` | Start recording via InstantReplay (Android only, Play Mode) |
-| `recording.stop` | Stop recording and finalize MP4 (async, poll status) |
-| `recording.status` | Get current recording/export state |
+| Tool | What it does | Platform |
+|------|-------------|----------|
+| `scene.get_hierarchy` | Scene tree (root→children, with components + positions) | All |
+| `scene.get_objects` | Filtered list by nameContains | All |
+| `scene.get_objects_by_type` | Objects with a component type | All |
+| `scene.get_objects_by_tag` | Objects with a tag | All |
+| `scene.get_objects_by_path` | Object at Transform path | All |
+| `scene.create_object` | New GameObject with options | All |
+| `scene.delete_object` | Destroy by instanceId or path | All |
+| `scene.duplicate_object` | Duplicate a GameObject | All |
+| `scene.rename` | Rename a GameObject | All |
+| `scene.set_active` | Enable/disable a GameObject | All |
+| `scene.set_transform` | Set position/rotation/scale | All |
+| `scene.set_parent` | Set parent (omit parentId or 0 to unparent to root) | All |
+| `scene.set_component_property` | Set field/property on a component | All |
+| `scene.set_material` ⚠ | Set material color/texture on Renderer | All |
+| `scene.get_components` | List all components on a GameObject | All |
+| `scene.get_component_properties` | Get all serializable properties + current values | All |
+| `scene.add_component` | Add component by type name | All |
+| `scene.remove_component` | Remove a component from a GameObject | All |
+| `scene.instantiate_prefab` | Instantiate a prefab from project Assets | Editor |
+| `scene.save_current` | Save current scene | Editor |
+| `scene.enter_play_mode` | Enter Play Mode | Editor |
+| `scene.exit_play_mode` | Exit Play Mode | Editor |
+| `scene.pause_play_mode` | Pause/resume Play Mode | Editor |
+| `scene.get_play_mode` | Get current play mode state | Editor |
+| `physics.raycast` | Cast a ray and return first hit info | All |
+| `camera.screenshot` | Capture main camera view and save as PNG | Editor |
+| `asset.refresh` | Refresh Unity asset database | All |
+| `asset.find_assets` | Search Assets/ by name and/or type (AssetDatabase.FindAssets) | Editor |
+| `asset.find_references` | Find all assets referencing a given asset | All |
+| `scene_view.get_camera` | Get SceneView camera state (pos/rot/FOV/pivot) | Editor |
+| `scene_view.set_camera` | Set SceneView camera (position/rotation/size/ortho) | Editor |
+| `editor.request_compile` | Trigger Unity script recompilation | Editor |
+| `editor.open_window` | Open a Unity Editor window by menu path | Editor |
+| `editor.window_focus` | Minimize/restore/focus Unity Editor window | Editor |
+| `editor.eval` | **Compile & execute C# code in-memory (instant)** | Editor |
+| `editor.get_console` | Get recent Editor console log entries | Editor |
+| `editor.undo` | Undo last operation | Editor |
+| `editor.redo` | Redo last undone operation | Editor |
+| `editor.get_preferences` | Read Editor/Project settings | Editor |
+| `editor.get_project_tree` | Get Assets directory tree (folders + files + sizes) | Editor |
+| `input.click_screen` | Simulate click at normalized screen position (EventSystem) | All |
+| `input.mouse_click` | Simulate mouse click at normalized screen position (Input System) | All |
+| `recording.start` | Start recording via InstantReplay (Android only, Play Mode) | Android |
+| `recording.stop` | Stop recording and finalize MP4 (async, poll status) | Android |
+| `recording.status` | Get current recording/export state | Android |
+| `recording.reset` | Force-reset recording system (recover from stuck state) | Android |
 
 Tools are auto-discovered via `AutoRegisterAll()` — just create a class with
 `[MCPTool]` methods and it's picked up automatically.
@@ -167,6 +177,12 @@ instance — the bridge must reconnect to the new one.
 | `Runtime/MCPToolRegistry.cs` | Scans for [MCPTool] methods |
 | `Runtime/Handlers/SceneHandler.cs` | Scene inspection + manipulation tools |
 | `Runtime/Handlers/RecordingHandler.cs` | Gameplay recording tools (CyberAgent InstantReplay) |
+| `Runtime/Handlers/EditorHandler.cs` | Editor window control + eval + console + project tree + prefs |
+| `Runtime/Handlers/SceneViewHandler.cs` | SceneView camera control |
+| `Runtime/Handlers/PhysicsHandler.cs` | Physics raycast |
+| `Runtime/Handlers/CameraHandler.cs` | Main camera screenshot |
+| `Runtime/MCPToolAttribute.cs` | MCPTool + MCPToolClass attrs + MCPToolPlatforms enum |
+| `Runtime/MCPToolRegistry.cs` | Auto-discovery + registration + platform filter |
 | `Editor/MCPBridgeWindow.cs` | Tools > SimpleMCPBridge window |
 | `Editor/AutoStartBridge.cs` | Auto-connect on domain reload |
 | `bridge-config.json` | Bridge IP/port |

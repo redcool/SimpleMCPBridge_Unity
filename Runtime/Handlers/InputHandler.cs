@@ -29,7 +29,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             return ProcessClick(args["x"], args["y"], 0);
         }
 
-        private static string ProcessClick(object rawX, object rawY, int button)
+        public static string ProcessClick(object rawX, object rawY, int button)
         {
             var nx = System.Convert.ToSingle(rawX, CultureInfo.InvariantCulture);
             var ny = System.Convert.ToSingle(rawY, CultureInfo.InvariantCulture);
@@ -135,7 +135,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
 
         // ── Helpers ──
 
-        private static float GetRequiredFloat(Dictionary<string, object> dict, string key)
+        public static float GetRequiredFloat(Dictionary<string, object> dict, string key)
         {
             if (!dict.TryGetValue(key, out var v))
                 throw new System.ArgumentException($"Missing required parameter: '{key}'");

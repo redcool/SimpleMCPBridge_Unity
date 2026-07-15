@@ -73,10 +73,30 @@ namespace SimpleMCPBridge.Runtime
         public const string REQUEST_COMPILE = "editor.request_compile";
         /// <summary>通过菜单路径打开 Unity Editor 窗口。</summary>
         public const string OPEN_WINDOW = "editor.open_window";
+        /// <summary>在 Editor 进程内编译执行 C# 代码片段 (in-memory, 即时)。</summary>
+        public const string EVAL = "editor.eval";
+        /// <summary>获取 Editor 控制台日志 (最近 N 条)。</summary>
+        public const string GET_CONSOLE = "editor.get_console";
+        /// <summary>撤销上一次操作。</summary>
+        public const string UNDO = "editor.undo";
+        /// <summary>重做上一次撤销。</summary>
+        public const string REDO = "editor.redo";
+        /// <summary>读取 Editor/Project 常用设置项。</summary>
+        public const string GET_PREFERENCES = "editor.get_preferences";
 
         // ── 编辑器窗口工具（Editor only） ──
         /// <summary>最小化、恢复或聚焦 Unity Editor 窗口。</summary>
         public const string EDITOR_WINDOW_FOCUS = "editor.window_focus";
+
+        // ── 项目浏览器工具 ──
+        /// <summary>获取 Assets 目录树 (路径/类型/大小)。</summary>
+        public const string GET_PROJECT_TREE = "editor.get_project_tree";
+
+        // ── Scene 视图工具 ──
+        /// <summary>获取 Scene 视图相机状态。</summary>
+        public const string SCENE_VIEW_GET_CAMERA = "scene_view.get_camera";
+        /// <summary>设置 Scene 视图相机位置/旋转/FOV。</summary>
+        public const string SCENE_VIEW_SET_CAMERA = "scene_view.set_camera";
 
         // ── 输入模拟工具 ──
         /// <summary>在屏幕指定位置模拟点击（通过 EventSystem 完整事件管线）。</summary>

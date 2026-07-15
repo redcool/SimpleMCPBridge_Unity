@@ -45,9 +45,12 @@ namespace SimpleMCPBridge.Runtime.Handlers
             );
         }
 
-        // 🚫 TOOL REMOVED — scene.find_assets is deprecated.
-        // Use VS Code global search *.meta instead — much faster.
-        // [MCPTool(MCPMethodConst.FIND_ASSETS, ...)]
+        [MCPTool(MCPMethodConst.FIND_ASSETS,
+            "Search Assets/ by name and/or type. " +
+            "Params: nameContains (string, optional) — substring to match against asset names. " +
+            "typeFilter (string, optional) — Unity asset type name, e.g. 'Prefab', 'Material', 'Texture', 'Scene'. " +
+            "Returns { filter, count, assets: [{ path, name, type, guid }] }.",
+            Platform = MCPToolPlatforms.Editor)]
         public static string FindAssets(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);

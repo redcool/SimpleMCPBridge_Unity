@@ -1,79 +1,299 @@
-#if UNITY_EDITOR
+﻿#if UNITY_EDITOR
 using SimpleMCPBridge;
 using SimpleMCPBridge.Runtime;
-using SimpleMCPBridge.Runtime.Models;
 using System;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
 using UnityEditor;
 using UnityEngine;
+using Object = UnityEngine.Object;
 using static SimpleMCPBridge.Runtime.Handlers.HandlerUtils;
 
 namespace SimpleMCPBridge.Runtime.Handlers
 {
     /// <summary>
-    /// Handles Unity Editor window manipulation tools.
-    /// Editor only — uses Win32 API to control the Editor window.
+    /// Handles Unity Editor window manipulation and utility tools.
+    /// Editor only — wrapped in #if UNITY_EDITOR.
     /// </summary>
     [MCPToolClass]
     public class EditorHandler
     {
-        [DllImport("user32.dll")]
-        private static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
-
-        [DllImport("user32.dll")]
-        private static extern bool SetForegroundWindow(IntPtr hWnd);
-
-        private const int SW_MINIMIZE = 6;
-        private const int SW_RESTORE = 9;
-
-        private static IntPtr GetUnityWindowHandle()
-        {
-            // Get the main window handle of the current Unity Editor process
-            using (var process = Process.GetCurrentProcess())
-            {
-                return process.MainWindowHandle;
-            }
-        }
+        // ─── Win32 window control (delegates to Win32Tools) ────────────────
 
         [MCPTool(MCPMethodConst.EDITOR_WINDOW_FOCUS,
-            "Minimize, restore, or focus the Unity Editor window via Win32 API. " +
-            "Params: action (string, required) — 'minimize' (send to taskbar), 'restore' (restore from minimized), " +
-            "or 'focus' (restore + bring to foreground). " +
-            "Useful for testing Editor behavior when losing/regaining focus.")]
+            "Control the Unity Editor window state via Win32 API. " +
+            "Params: action (string, required) — 'minimize', 'restore', 'focus', 'maximize', or 'get_state'. " +
+            "'get_state' returns { state: 'normal'|'minimized'|'maximized'|'hidden' } without changing anything.")]
         public static string WindowFocus(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
             var action = GetRequiredString(args, "action").ToLowerInvariant();
 
-            var hWnd = GetUnityWindowHandle();
+            var hWnd = Win32Tools.GetWindowHandle();
             if (hWnd == IntPtr.Zero)
                 return ErrorJson("Could not find Unity Editor window handle");
+
+            if (action == "get_state")
+            {
+                var state = Win32Tools.GetWindowState(hWnd);
+                return JsonHelper.BuildJsonObject(
+                    ("success", "true"),
+                    ("action", JsonHelper.EscapeString("get_state")),
+                    ("state", JsonHelper.EscapeString(state))
+                );
+            }
 
             switch (action)
             {
                 case "minimize":
-                    ShowWindowAsync(hWnd, SW_MINIMIZE);
-                    return JsonHelper.BuildJsonObject(
-                        ("success", "true"),
-                        ("action", JsonHelper.EscapeString("minimize"))
-                    );
+                    Win32Tools.Minimize(hWnd);
+                    return JsonHelper.BuildJsonObject(("success", "true"), ("action", JsonHelper.EscapeString("minimize")));
                 case "restore":
-                    ShowWindowAsync(hWnd, SW_RESTORE);
-                    return JsonHelper.BuildJsonObject(
-                        ("success", "true"),
-                        ("action", JsonHelper.EscapeString("restore"))
-                    );
+                    Win32Tools.Restore(hWnd);
+                    return JsonHelper.BuildJsonObject(("success", "true"), ("action", JsonHelper.EscapeString("restore")));
                 case "focus":
-                    ShowWindowAsync(hWnd, SW_RESTORE);
-                    SetForegroundWindow(hWnd);
-                    return JsonHelper.BuildJsonObject(
-                        ("success", "true"),
-                        ("action", JsonHelper.EscapeString("focus"))
-                    );
+                    Win32Tools.Focus(hWnd);
+                    return JsonHelper.BuildJsonObject(("success", "true"), ("action", JsonHelper.EscapeString("focus")));
+                case "maximize":
+                    Win32Tools.Maximize(hWnd);
+                    return JsonHelper.BuildJsonObject(("success", "true"), ("action", JsonHelper.EscapeString("maximize")));
                 default:
-                    return ErrorJson($"Unknown action '{action}'. Use 'minimize', 'restore', or 'focus'.");
+                    return ErrorJson($"Unknown action '{action}'. Use 'minimize', 'restore', 'focus', 'maximize', or 'get_state'.");
             }
+        }
+
+        // ─── editor.eval — delegates to MonoCSharpTools ───────────────────
+
+        [MCPTool(MCPMethodConst.EVAL,
+            "Execute C# code in the Unity Editor process using Mono.CSharp (in-memory, instant, no domain reload). " +
+            "Params: code (string, required) — any valid C# statement or expression. " +
+            "The evaluator maintains state across calls — variables persist. " +
+            "Pre-imported namespaces: System, System.Linq, System.Collections.Generic, " +
+            "UnityEngine, UnityEditor, UnityEngine.UI, UnityEngine.EventSystems. " +
+            "UnityEngine.Object aliased as UnityObject. " +
+            "Example: 'GameObject.Find(\"Main Camera\").transform.position.ToString()'")]
+        public static string Eval(string paramsJson)
+        {
+            var args = ParseJsonObject(paramsJson);
+            var code = GetRequiredString(args, "code");
+            if (string.IsNullOrWhiteSpace(code))
+                return ErrorJson("Missing required parameter 'code'.");
+
+            try
+            {
+                var result = MonoCSharpTools.Evaluate(code);
+
+                if (result == null)
+                    return JsonHelper.BuildJsonObject(("success", "true"),
+                        ("note", JsonHelper.EscapeString("statement executed")));
+
+                var json = MonoCSharpTools.SerializeEvalResult(result);
+                return JsonHelper.BuildJsonObject(
+                    ("success", "true"),
+                    ("result", JsonHelper.EscapeString(json)),
+                    ("type", JsonHelper.EscapeString(result.GetType().Name))
+                );
+            }
+            catch (Exception ex)
+            {
+                return ErrorJson($"Eval failed: {ex.Message}");
+            }
+        }
+
+        // ─── editor.get_console ───────────────────────────────────────────
+
+        // Circular buffer for console log cache
+        private const int CONSOLE_CACHE_SIZE = 200;
+        private static readonly List<ConsoleEntry> _consoleCache = new(CONSOLE_CACHE_SIZE);
+        private static bool _consoleInitialized;
+
+        private class ConsoleEntry
+        {
+            public string message;
+            public string stackTrace;
+            public string type; // "Log", "Warning", "Error", "Exception", "Assert"
+            public string time;
+        }
+
+        [InitializeOnLoadMethod]
+        private static void InitConsoleCapture()
+        {
+            if (_consoleInitialized) return;
+            _consoleInitialized = true;
+            Application.logMessageReceivedThreaded += (condition, stackTrace, type) =>
+            {
+                lock (_consoleCache)
+                {
+                    _consoleCache.Add(new ConsoleEntry
+                    {
+                        message = condition,
+                        stackTrace = stackTrace,
+                        type = type.ToString(),
+                        time = DateTime.Now.ToString("HH:mm:ss.fff"),
+                    });
+                    if (_consoleCache.Count > CONSOLE_CACHE_SIZE)
+                        _consoleCache.RemoveRange(0, _consoleCache.Count - CONSOLE_CACHE_SIZE);
+                }
+            };
+        }
+
+        [MCPTool(MCPMethodConst.GET_CONSOLE,
+            "Get recent Editor console log entries. " +
+            "Params: count (int, optional, default 50) — max entries to return. " +
+            "Returns array of { message, stackTrace, type, time }. " +
+            "Type values: Log, Warning, Error, Exception, Assert.")]
+        public static string GetConsole(string paramsJson)
+        {
+            var args = ParseJsonObject(paramsJson);
+            var count = (int)GetOptionalInt(args, "count").GetValueOrDefault(50);
+            count = Mathf.Clamp(count, 1, CONSOLE_CACHE_SIZE);
+
+            lock (_consoleCache)
+            {
+                var entries = _consoleCache.Skip(Math.Max(0, _consoleCache.Count - count)).ToList();
+                var jsonEntries = new List<string>();
+                foreach (var e in entries)
+                {
+                    jsonEntries.Add($@"{{""message"":{JsonHelper.EscapeString(e.message)},""stackTrace"":{JsonHelper.EscapeString(e.stackTrace)},""type"":{JsonHelper.EscapeString(e.type)},""time"":{JsonHelper.EscapeString(e.time)}}}");
+                }
+                return $"[{string.Join(",", jsonEntries)}]";
+            }
+        }
+
+        // ─── editor.undo / editor.redo ────────────────────────────────────
+
+        [MCPTool(MCPMethodConst.UNDO,
+            "Undo the last operation in the Unity Editor.")]
+        public static string UndoTool(string paramsJson)
+        {
+            UnityEditor.Undo.PerformUndo();
+            return JsonHelper.BuildJsonObject(("success", "true"));
+        }
+
+        [MCPTool(MCPMethodConst.REDO,
+            "Redo the last undone operation in the Unity Editor.")]
+        public static string RedoTool(string paramsJson)
+        {
+            UnityEditor.Undo.PerformRedo();
+            return JsonHelper.BuildJsonObject(("success", "true"));
+        }
+
+        // ─── editor.get_preferences ───────────────────────────────────────
+
+        [MCPTool(MCPMethodConst.GET_PREFERENCES,
+            "Read common Unity Editor and Project settings. " +
+            "Params: keys (string[], optional) — specific setting keys to read. " +
+            "If omitted, returns a useful default set: " +
+            "productName, companyName, scriptingBackend, apiCompatibilityLevel, " +
+            "buildTarget, activeBuildTargetGroup, " +
+            "Editor/applicationContentsPath, Editor/unityVersion. " +
+            "Custom EditorPrefs keys can be queried by passing keys array.")]
+        public static string GetPreferences(string paramsJson)
+        {
+            var args = ParseJsonObject(paramsJson);
+            var result = new Dictionary<string, string>();
+
+            // If specific keys requested, read those from EditorPrefs
+            if (args.TryGetValue("keys", out var keysObj) && keysObj is List<object> keysList)
+            {
+                foreach (var key in keysList)
+                {
+                    var keyStr = key?.ToString() ?? "";
+                    if (EditorPrefs.HasKey(keyStr))
+                        result[keyStr] = EditorPrefs.GetString(keyStr);
+                    else
+                        result[keyStr] = "(not set)";
+                }
+            }
+            else
+            {
+                // Default useful set of project info
+                result["productName"] = PlayerSettings.productName;
+                result["companyName"] = PlayerSettings.companyName;
+                result["applicationIdentifier"] = PlayerSettings.applicationIdentifier;
+                result["scriptingBackend"] = PlayerSettings.GetScriptingBackend(EditorUserBuildSettings.selectedBuildTargetGroup).ToString();
+                result["apiCompatibilityLevel"] = PlayerSettings.GetApiCompatibilityLevel(EditorUserBuildSettings.selectedBuildTargetGroup).ToString();
+                result["buildTarget"] = EditorUserBuildSettings.activeBuildTarget.ToString();
+                result["activeBuildTargetGroup"] = EditorUserBuildSettings.selectedBuildTargetGroup.ToString();
+                result["Editor/unityVersion"] = Application.unityVersion;
+                result["Editor/applicationContentsPath"] = EditorApplication.applicationContentsPath;
+                result["Editor/applicationPath"] = EditorApplication.applicationPath;
+                result["Editor/dataPath"] = Application.dataPath;
+
+                // Try to get color space and other project settings
+                result["Graphics/colorSpace"] = PlayerSettings.colorSpace.ToString();
+            }
+
+            // Build JSON with proper nesting using JsonHelper
+            var json = JsonHelper.BuildJsonObject(
+                result.Select(kv => (kv.Key, JsonHelper.EscapeString(kv.Value))).ToArray()
+            );
+            return json;
+        }
+
+        // ─── editor.get_project_tree ──────────────────────────────────────
+
+        [MCPTool(MCPMethodConst.GET_PROJECT_TREE,
+            "Get the Assets directory tree. " +
+            "Params: path (string, optional) — subdirectory under Assets/ (default 'Assets'). " +
+            "maxDepth (int, optional, default 5, max 10). " +
+            "Returns a nested JSON array of { name, path, type (folder/file), size (bytes, 0 for folders) }.")]
+        public static string GetProjectTree(string paramsJson)
+        {
+            var args = ParseJsonObject(paramsJson);
+            var subPath = GetString(args, "path", "Assets");
+            var maxDepth = (int)Math.Min(GetOptionalInt(args, "maxDepth").GetValueOrDefault(5), 10);
+            var rootDir = Path.GetFullPath(subPath);
+
+            if (!rootDir.StartsWith(Path.GetFullPath(Application.dataPath)) && subPath != "Assets")
+                return ErrorJson($"Path must be under '{Application.dataPath}'.");
+
+            try
+            {
+                var sb = new StringBuilder();
+                BuildTreeJson(sb, rootDir, 0, maxDepth);
+                return sb.ToString();
+            }
+            catch (Exception ex)
+            {
+                return ErrorJson($"Failed to read project tree: {ex.Message}");
+            }
+        }
+
+        public static void BuildTreeJson(StringBuilder sb, string dir, int depth, int maxDepth)
+        {
+            if (depth > maxDepth) return;
+            if (depth == 0) sb.Append("[");
+
+            try
+            {
+                var dirInfo = new DirectoryInfo(dir);
+                bool first = true;
+
+                // Directories first
+                foreach (var d in dirInfo.GetDirectories().OrderBy(d => d.Name))
+                {
+                    if (d.Name.StartsWith(".") || d.Name == "~") continue;
+                    if (!first) sb.Append(","); first = false;
+                    sb.Append($@"{{""name"":{JsonHelper.EscapeString(d.Name)},""path"":{JsonHelper.EscapeString(d.FullName)},""type"":""folder"",""size"":0,");
+                    sb.Append("\"children\":[");
+                    BuildTreeJson(sb, d.FullName, depth + 1, maxDepth);
+                    sb.Append("]}");
+                }
+
+                // Files
+                foreach (var f in dirInfo.GetFiles().OrderBy(f => f.Name))
+                {
+                    if (f.Name.StartsWith(".") || f.Name.EndsWith(".meta")) continue;
+                    if (!first) sb.Append(","); first = false;
+                    sb.Append($@"{{""name"":{JsonHelper.EscapeString(f.Name)},""path"":{JsonHelper.EscapeString(f.FullName)},""type"":""file"",""size"":{f.Length}}}");
+                }
+            }
+            catch (UnauthorizedAccessException) { }
+
+            if (depth == 0) sb.Append("]");
         }
     }
 }

@@ -330,7 +330,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
 
         // ─── Helpers ───────────────────────────────────────────────────────
 
-        private static void ResetState()
+        public static void ResetState()
         {
             _outputPath = null;
             _startTime = default;
@@ -339,13 +339,13 @@ namespace SimpleMCPBridge.Runtime.Handlers
             _exportTask = null;
         }
 
-        private static void CleanupSession()
+        public static void CleanupSession()
         {
             _session?.Dispose();
             _session = null;
         }
 
-        private static string BuildOutputPath()
+        public static string BuildOutputPath()
         {
             string dir;
 #if UNITY_EDITOR || UNITY_STANDALONE
@@ -357,7 +357,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             return Path.Combine(dir, $"recording_{timestamp}.mp4");
         }
 
-        private static string BuildCompletedJson(string filePath)
+        public static string BuildCompletedJson(string filePath)
         {
             return JsonHelper.BuildJsonObject(
                 ("isRecording", "false"),
@@ -367,7 +367,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             );
         }
 
-        private static string BuildErrorJson(string error)
+        public static string BuildErrorJson(string error)
         {
             return JsonHelper.BuildJsonObject(
                 ("isRecording", "false"),
@@ -380,7 +380,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         /// Maps quality (1-100) to video bitrate in bps.
         /// Lower quality → lower bitrate → smaller file but worse image.
         /// </summary>
-        private static int QualityToBitrate(int quality)
+        public static int QualityToBitrate(int quality)
         {
             quality = Mathf.Clamp(quality, 1, 100);
             if (quality >= 90) return 12000000; // 12 Mbps — very high
@@ -390,7 +390,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             return 1000000;                      //  1 Mbps — very low
         }
 
-        private static void CleanupOldRecordings(string directory, int keepCount)
+        public static void CleanupOldRecordings(string directory, int keepCount)
         {
             try
             {
