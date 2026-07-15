@@ -45,9 +45,9 @@ namespace SimpleMCPBridge.Runtime.Handlers
             );
         }
 
-        [MCPTool(MCPMethodConst.FIND_ASSETS, "Search project Assets by name and/or type. " +
-            "Examples: nameContains='Player', typeFilter='Prefab', or both. " +
-            "Returns array of {path, name, type, guid}.")]
+        // 🚫 TOOL REMOVED — scene.find_assets is deprecated.
+        // Use VS Code global search *.meta instead — much faster.
+        // [MCPTool(MCPMethodConst.FIND_ASSETS, ...)]
         public static string FindAssets(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
@@ -163,3 +163,4 @@ namespace SimpleMCPBridge.Runtime.Handlers
     }
 }
 #endif
+

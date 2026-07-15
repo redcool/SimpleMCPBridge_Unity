@@ -480,6 +480,27 @@ namespace SimpleMCPBridge.Runtime.Handlers
             return ErrorJson($"Component type '{componentType}' not found in any assembly");
         }
 
+        [MCPTool(MCPMethodConst.REMOVE_COMPONENT, "Remove a component from a GameObject by instanceId or path and type name (e.g. BoxCollider, Rigidbody)")]
+        public static string RemoveComponent(string paramsJson)
+        {
+            var args = ParseJsonObject(paramsJson);
+            var go = ResolveTarget(args);
+            if (go == null) return ErrorJson("Object not found. Provide 'instanceId' or 'path'.");
+
+            var componentType = GetRequiredString(args, "componentType");
+
+            var component = FindComponentByTypeName(go, componentType);
+            if (component == null)
+                return ErrorJson($"Component '{componentType}' not found on object '{go.name}'");
+
+#if UNITY_EDITOR
+            UnityEditor.Undo.DestroyObjectImmediate(component);
+#else
+            Object.DestroyImmediate(component);
+#endif
+            return JsonHelper.BuildJsonObject(("success", "true"));
+        }
+
 #if UNITY_EDITOR
         [MCPTool(MCPMethodConst.ENTER_PLAY_MODE, "Enter Play Mode in the Unity Editor")]
         public static string EnterPlayMode(string paramsJson)
@@ -548,6 +569,27 @@ namespace SimpleMCPBridge.Runtime.Handlers
                 ("isPlaying", JsonHelper.BoolJson(UnityEditor.EditorApplication.isPlaying)),
                 ("isPaused", JsonHelper.BoolJson(UnityEditor.EditorApplication.isPaused)),
                 ("mode", JsonHelper.EscapeString(mode))
+            );
+        }
+
+        [MCPTool(MCPMethodConst.SAVE_CURRENT_SCENE, "Save the current Unity scene. If savePath is not provided, saves the current scene in place. If the scene is untitled, savePath is required.")]
+        public static string SaveCurrent(string paramsJson)
+        {
+            var args = ParseJsonObject(paramsJson);
+            var savePath = GetString(args, "savePath");
+
+            var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            if (string.IsNullOrEmpty(savePath))
+            {
+                if (string.IsNullOrEmpty(scene.path))
+                    return ErrorJson("Scene is untitled. Provide 'savePath' to specify where to save.");
+                savePath = scene.path;
+            }
+
+            UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene, savePath, true);
+            return JsonHelper.BuildJsonObject(
+                ("success", "true"),
+                ("path", JsonHelper.EscapeString(savePath))
             );
         }
 #endif
@@ -852,3 +894,4 @@ namespace SimpleMCPBridge.Runtime.Handlers
     }
 }
 // mcp-revision: 181633
+

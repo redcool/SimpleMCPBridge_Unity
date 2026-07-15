@@ -43,6 +43,10 @@ namespace SimpleMCPBridge.Runtime
         public const string SET_PARENT = "scene.set_parent";
         /// <summary>添加组件。</summary>
         public const string ADD_COMPONENT = "scene.add_component";
+        /// <summary>移除组件。</summary>
+        public const string REMOVE_COMPONENT = "scene.remove_component";
+        /// <summary>保存当前场景（Editor only）。</summary>
+        public const string SAVE_CURRENT_SCENE = "scene.save_current";
         /// <summary>进入播放模式（Editor only）。</summary>
         public const string ENTER_PLAY_MODE = "scene.enter_play_mode";
         /// <summary>退出播放模式（Editor only）。</summary>
@@ -70,11 +74,23 @@ namespace SimpleMCPBridge.Runtime
         /// <summary>通过菜单路径打开 Unity Editor 窗口。</summary>
         public const string OPEN_WINDOW = "editor.open_window";
 
+        // ── 编辑器窗口工具（Editor only） ──
+        /// <summary>最小化、恢复或聚焦 Unity Editor 窗口。</summary>
+        public const string EDITOR_WINDOW_FOCUS = "editor.window_focus";
+
         // ── 输入模拟工具 ──
         /// <summary>在屏幕指定位置模拟点击（通过 EventSystem 完整事件管线）。</summary>
         public const string CLICK_SCREEN = "input.click_screen";
         /// <summary>在屏幕指定位置模拟鼠标点击（通过 Input System 低层级事件队列）。</summary>
         public const string MOUSE_CLICK = "input.mouse_click";
+
+        // ── 物理工具 ──
+        /// <summary>从指定位置发射射线检测碰撞。</summary>
+        public const string PHYSICS_RAYCAST = "physics.raycast";
+
+        // ── 相机工具 ──
+        /// <summary>截取主相机画面并保存为 PNG。</summary>
+        public const string CAMERA_SCREENSHOT = "camera.screenshot";
 
         // ── 录制工具 ──
         /// <summary>开始录制游戏画面。</summary>

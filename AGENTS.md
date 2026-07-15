@@ -54,7 +54,7 @@ server keeps only the most recent one.
 - **Server stderr:** `SimpleMcpServer/server.err`
 - **Unity Editor log:** `$env:LOCALAPPDATA\Unity\Editor\Editor.log`
 
-## Tools (26)
+## Tools (32)
 
 | Tool | What it does |
 |------|-------------|
@@ -64,26 +64,36 @@ server keeps only the most recent one.
 | `scene.get_objects_by_tag` | Objects with a tag (+ optional nameContains/layer/layerName) |
 | `scene.get_objects_by_path` | Object at Transform path (+ optional nameContains/layer/layerName) |
 | `scene.create_object` | New GameObject with optional position/rotation/scale/parentId |
-| `scene.delete_object` | Destroy by instanceId |
-| `scene.set_transform` | Set position/rotation/scale by instanceId |
-| `scene.set_component_property` | Set field/property on a component (supports Vector3, Color, enum, etc.) |
-| `scene.get_components` | List all components on a GameObject (type name, fullType, enabled) |
-| `scene.get_component_properties` | Get all serializable properties + current values of a component |
-| `scene.set_active` | Enable/disable a GameObject |
+| `scene.delete_object` | Destroy by instanceId or path |
 | `scene.duplicate_object` | Duplicate a GameObject |
 | `scene.rename` | Rename a GameObject |
+| `scene.set_active` | Enable/disable a GameObject |
+| `scene.set_transform` | Set position/rotation/scale (world or local space) |
 | `scene.set_parent` | Set parent (omit parentId or 0 to unparent to root) |
+| `scene.set_component_property` | Set field/property on a component (supports Vector3, Color, enum, etc.) |
+| `scene.set_material` ⚠ | Set material color/texture on Renderer |
+| `scene.get_components` | List all components on a GameObject |
+| `scene.get_component_properties` | Get all serializable properties + current values of a component |
 | `scene.add_component` | Add component by type name (e.g. Rigidbody) |
-| `scene.instantiate_prefab` | Instantiate a prefab from project Assets by asset path (Editor only) |
-| `scene.find_assets` 🚫 | **DO NOT USE.** Use VS Code global search `*.meta` instead — much faster |
-| `scene.set_material` ⚠ | Set material color/texture on Renderer. For asset-level material edits, prefer editing `.meta` GUIDs via filesystem |
+| `scene.remove_component` | Remove a component from a GameObject by type name |
+| `scene.instantiate_prefab` | Instantiate a prefab from project Assets (Editor only) |
+| `scene.save_current` | Save current scene (Editor only) |
 | `scene.enter_play_mode` | Enter Play Mode (Editor only) |
 | `scene.exit_play_mode` | Exit Play Mode (Editor only) |
-| `recording.start` | Start recording via InstantReplay (OS-native encoding, no external binaries) (Play Mode only). Params: width/height/fps/enableAudio/quality |
-| `recording.stop` | Stop recording and finalize MP4 (async, poll status for completion via recording.status) |
-| `recording.status` | Get current recording/export state — returns isRecording/elapsedSeconds/completed filePath |
-| `scene.pause_play_mode` | Pause/resume Play Mode — `paused: true/false` (Editor only) |
-| `editor.request_compile` | Trigger Unity script recompilation (after editing C# via filesystem) (Editor only) |
+| `scene.pause_play_mode` | Pause/resume Play Mode (Editor only) |
+| `scene.get_play_mode` | Get current play mode state (Editor only) |
+| `physics.raycast` | Cast a ray and return first hit (point, normal, distance, collider info) |
+| `camera.screenshot` | Capture main camera view and save as PNG (Editor only) |
+| `asset.refresh` | Refresh Unity asset database |
+| `asset.find_assets` 🚫 | **DEPRECATED.** Use VS Code global search `*.meta` instead |
+| `asset.find_references` | Find all assets referencing a given asset |
+| `editor.request_compile` | Trigger Unity script recompilation (Editor only) |
+| `editor.open_window` | Open a Unity Editor window by menu path (Editor only) |
+| `input.click_screen` | Simulate click at normalized screen position (EventSystem path) |
+| `input.mouse_click` | Simulate mouse click at normalized screen position (Input System path) |
+| `recording.start` | Start recording via InstantReplay (Android only, Play Mode) |
+| `recording.stop` | Stop recording and finalize MP4 (async, poll status) |
+| `recording.status` | Get current recording/export state |
 
 Tools are auto-discovered via `AutoRegisterAll()` — just create a class with
 `[MCPTool]` methods and it's picked up automatically.

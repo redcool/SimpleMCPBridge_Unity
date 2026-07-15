@@ -21,7 +21,7 @@ namespace SimpleMCPBridge.Runtime
         /// <summary>
         /// Register a single static [MCPTool] method.
         /// </summary>
-        private void RegisterMethod(MethodInfo method, string name, string description)
+        private void RegisterMethod(MethodInfo method, string name, string description, MCPToolPlatforms platform)
         {
             // Validate: (string) -> string
             var parameters = method.GetParameters();
@@ -38,6 +38,17 @@ namespace SimpleMCPBridge.Runtime
                 return;
             }
 
+            // Platform filter
+            if (platform != MCPToolPlatforms.All)
+            {
+                var current = CurrentPlatform();
+                if ((platform & current) == 0)
+                {
+                    DebugUtils.Log($"[MCPToolRegistry] Skipping '{name}' — filtered to {platform}, current is {current}.");
+                    return;
+                }
+            }
+
             if (_tools.ContainsKey(name))
             {
                 DebugUtils.LogWarning(
@@ -49,6 +60,26 @@ namespace SimpleMCPBridge.Runtime
 
             _tools[name] = new ToolEntry(name, description, del);
             DebugUtils.Log($"[MCPToolRegistry] Registered '{method.DeclaringType?.Name}.{method.Name}' as '{name}'");
+        }
+
+        /// <summary>
+        /// Map UnityEngine.RuntimePlatform to our MCPToolPlatforms flags.
+        /// </summary>
+        private static MCPToolPlatforms CurrentPlatform()
+        {
+#if UNITY_EDITOR
+            return MCPToolPlatforms.Editor;
+#elif UNITY_ANDROID
+            return MCPToolPlatforms.Android;
+#elif UNITY_IOS
+            return MCPToolPlatforms.iOS;
+#elif UNITY_STANDALONE
+            return MCPToolPlatforms.Standalone;
+#elif UNITY_WEBGL
+            return MCPToolPlatforms.WebGL;
+#else
+            return MCPToolPlatforms.All;
+#endif
         }
 
         /// <summary>
@@ -85,7 +116,7 @@ namespace SimpleMCPBridge.Runtime
                     {
                         var attr = method.GetCustomAttribute<MCPToolAttribute>();
                         if (attr == null) continue;
-                        RegisterMethod(method, attr.Name, attr.Description);
+                        RegisterMethod(method, attr.Name, attr.Description, attr.Platform);
                     }
                 }
             }

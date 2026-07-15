@@ -34,7 +34,7 @@ namespace SimpleMCPBridge.Runtime
         /// </summary>
         public static event Action<string> OnResponseReceived;
 
-        private static MCPBridge _bridge;
+        private static BridgeClient _bridge;
         private static readonly Dictionary<string, TaskCompletionSource<string>> _pending = new();
         private static int _requestCounter;
 
@@ -42,7 +42,7 @@ namespace SimpleMCPBridge.Runtime
         /// Register the MCPBridge instance. Call this when the bridge connects
         /// (e.g. from OnConnectedSuccess callback or when the bridge is created).
         /// </summary>
-        public static void Register(MCPBridge bridge)
+        public static void Register(BridgeClient bridge)
         {
             if (bridge == null) return;
 

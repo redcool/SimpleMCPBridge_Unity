@@ -44,7 +44,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9aa2221adecb86342b17d4c223a2da16, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  _serverIp: 10.0.46.244
+  _serverIp: 127.0.0.1
   _serverPort: 45678
   dontDestroyOnLoad: 1
   isAutoReconnect: 1
+  mcpLogo: {fileID: 2800000, guid: 54039b9fa8cab6c45a664637a151518f, type: 3}

@@ -34,13 +34,18 @@ Assets/
 │   │   ├── MCPBridge.cs     # 核心桥接类（plain C#，非 MonoBehaviour）
 │   │   ├── WebSocketClient.cs
 │   │   ├── Handlers/        # 工具处理器
-│   │   │   ├── HandlerUtils.cs   # 静态工具类（JSON 解析、错误响应）
-│   │   │   ├── SceneHandler.cs   # 场景工具（23 个 scene.* 工具）
-│   │   │   └── AssetHandler.cs   # 资源工具（asset.find_assets 等）
+│   │   │   ├── HandlerUtils.cs       # 静态工具类（JSON 解析、错误响应）
+│   │   │   ├── SceneHandler.cs       # 场景工具（scene.* 系列）
+│   │   │   ├── RecordingHandler.cs   # 录制工具（recording.* 系列，基于 InstantReplay）
+│   │   │   └── FreshFrameProvider.cs # 自定义帧采集器（解决 ScreenshotFrameProvider 纹理重用竞态）
 │   │   └── Models/
 │   ├── Editor/              # Editor Window + 自动启动
 │   ├── bridge-config.json   # IP/Port 配置
 │   └── AGENTS.md            # AI 开发指引
+├── Plugins/                # NuGet DLL 依赖（InstantReplay/UniEnc）
+│   ├── System.IO.Pipelines.dll
+│   ├── System.Threading.Channels.dll
+│   └── System.Runtime.CompilerServices.Unsafe.dll
 ├── ...
 ```
 
@@ -49,7 +54,7 @@ Assets/
 ## 使用方法
 
 1. 用 Unity 打开项目
-2. 菜单栏 → **PowerUtilities → SimpleMCPBridge**
+2. 菜单栏 → **Tools → SimpleMCPBridge**
 3. 填写 Server IP/Port（默认 `127.0.0.1:45678`）
 4. 点击 **Connect to Server**
 5. 在另一侧启动 `SimpleMcpServer`
@@ -60,6 +65,8 @@ Bridge 生命周期独立于窗口：关闭窗口后 bridge 继续运行，进�
 
 - **Unity 2022.3+**（URP）
 - **[SimpleMcpServer](https://github.com/redcool/SimpleMCPServer)** — 需先 clone 并启动
+- **[CyberAgent InstantReplay](https://github.com/CyberAgentGameEntertainment/InstantReplay)** — 通过 UPM 安装（`jp.co.cyberagent.instant-replay`），用于录制 MP4
+- **Plugins 依赖 DLL** — `System.IO.Pipelines`、`System.Threading.Channels`、`System.Runtime.CompilerServices.Unsafe`（InstantReplay/UniEnc 的原生编码层需要）
 
 ## 配置
 
@@ -85,7 +92,7 @@ Bridge 生命周期独立于窗口：关闭窗口后 bridge 继续运行，进�
 
 `get_hierarchy` 和 `get_objects` 的返回值同时包含 `instanceId` 和 `path`，AI agent 可自由选择。
 
-## 可用工具（共 23 个）
+## 可用工具（共 32 个）
 
 ### 场景工具（SceneHandler）
 
@@ -117,6 +124,48 @@ Bridge 生命周期独立于窗口：关闭窗口后 bridge 继续运行，进�
 |------|------|
 | `asset.find_assets` | 按名称和/或类型搜索项目 Assets。参数：`nameContains`（可选）、`typeFilter`（可选，如 `"Prefab"`、`"Material"`）。返回 `{path, name, type, guid}` 列表 |
 | `asset.find_references` | 查找引用了指定资源的所有资源（反向依赖）。参数：`assetPath`（必填）。扫描文件内容中的 GUID，返回引用者列表。可靠但较慢 |
+
+### 录制工具（RecordingHandler，基于 InstantReplay）
+
+使用 [CyberAgent InstantReplay](https://github.com/CyberAgentGameEntertainment/InstantReplay) 实现 OS 原生硬编码（Media Foundation / VideoToolbox / MediaCodec），无需外部 FFmpeg 二进制。
+
+> **⚠️ 仅在 Play Mode 下可用。** 录制前必须先调用 `scene.enter_play_mode`。
+
+| 工具 | 说明 |
+|------|------|
+| `recording.start` | 开始录制屏幕。参数：`width`/`height`（默认 1280x720）、`fps`（默认 30）、`quality` 1-100（默认 50）、`enableAudio`（默认 false）。返回 outputPath |
+| `recording.stop` | 停止录制并开始 MP4 编码。返回 `status: "encoding"` |
+| `recording.status` | 轮询录制/编码状态。状态：`idle` → `recording` → `encoding` → `completed` / `error`。完成后返回 `filePath` |
+
+#### 录制流程
+
+```
+1. scene.enter_play_mode          # 进入播放模式
+2. scene.create_object(...)       # 创建要移动的对象
+3. recording.start(640,480,30,75) # 开始录制
+4. scene.set_transform(...)       # 移动对象（叠加位移：先 get pos → +delta → set pos）
+5. recording.stop                 # 停止录制
+6. recording.status               # 轮询直到 state="completed"
+7. scene.exit_play_mode           # 退出播放模式
+```
+
+#### Quality → Bitrate 映射
+
+| quality | bitrate | 级别 |
+|---------|---------|------|
+| 90-100 | 12 Mbps | 非常高 |
+| 75-89  | 8 Mbps  | 高 |
+| 50-74  | 4 Mbps  | 中等（默认）|
+| 25-49  | 2 Mbps  | 低 |
+| 1-24   | 1 Mbps  | 非常低 |
+
+#### FreshFrameProvider
+
+`ScreenshotFrameProvider`（InstantReplay 默认）每帧复用同一个 `RenderTexture`，导致下游管线读取时内容已被下一帧覆盖（竞态条件）。`FreshFrameProvider` 每帧创建新 `RenderTexture`，彻底解决此问题：
+
+- 每帧 `ScreenCapture.CaptureScreenshotIntoRenderTexture` 到独立纹理
+- 上一帧纹理延迟一帧销毁（确保管线已完成处理）
+- 配合 `ForceReadback = false`（Blit 路径），编码器直接从独立纹理 blit，无竞态
 
 ### 编辑器工具
 
@@ -185,5 +234,7 @@ public class MyTools
 |------|------|
 | [SimpleMCPBridge](https://github.com/redcool/SimpleMCPBridge_Unity) | 本仓库 — Unity 桥接包 |
 | [SimpleMcpServer](https://github.com/redcool/SimpleMCPServer) | MCP Server — Node.js/TypeScript，处理 MCP 协议并转发请求到 Unity |
-两个仓库都需要 clone。分开管理避免耦合。
-| [InstantReplay](https://github.com/CyberAgentGameEntertainment/InstantReplay) | CyberAgent InstantReplay — OS原生硬编码，录制mp4 (替换FFmpegUnityBind2) |
+| [InstantReplay](https://github.com/CyberAgentGameEntertainment/InstantReplay) | CyberAgent InstantReplay — OS 原生硬编码，录制 MP4。通过 `manifest.json` 添加 UPM 包 |
+
+两个仓库都需要 clone（SimpleMCPBridge + SimpleMcpServer）。InstantReplay 通过 Unity Package Manager 安装，无需 clone。
+

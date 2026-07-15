@@ -1,4 +1,4 @@
-using SimpleMCPBridge.Runtime;
+﻿using SimpleMCPBridge.Runtime;
 using SimpleMCPBridge.Runtime.Models;
 using System;
 using System.IO;
@@ -17,6 +17,10 @@ namespace SimpleMCPBridge.Runtime.Handlers
     ///
     /// Encoding runs asynchronously — poll recording.status for completion.
     /// No external ffmpeg binaries required on any platform.
+    ///
+    /// recording.* tools use [MCPTool(Platform = MCPToolPlatforms.Android | …)]
+    /// to skip registration on platforms where recording isn't meaningful,
+    /// without needing #if !UNITY_EDITOR guards. Methods are visible to VS.
     /// </summary>
     [MCPToolClass]
     public class RecordingHandler
@@ -35,17 +39,17 @@ namespace SimpleMCPBridge.Runtime.Handlers
         private const int MAX_KEEP_FILES = 5;
 
         // ─── recording.start ──────────────────────────────────────────────
-
+        // Only registers on device builds (Android/iOS/Standalone) via Platform filter.
+        // Editor bridge skips registration so routing goes to device.
         [MCPTool(MCPMethodConst.START_RECORDING,
             "Start recording screen capture via CyberAgent InstantReplay (OS-native encoding). "
             + "Only works in Play Mode. "
             + "Params: width/height (default 1280x720), fps (default 30), "
             + "enableAudio (default false), quality 1-100 (default 50). "
-            + "Returns success, outputPath, width, height, fps.")]
+            + "Returns success, outputPath, width, height, fps.",
+            Platform = MCPToolPlatforms.Android | MCPToolPlatforms.iOS | MCPToolPlatforms.Standalone)]
         public static string StartRecording(string paramsJson)
         {
-            if (!Application.isPlaying)
-                return ErrorJson("Recording is only supported in Play Mode. Enter Play Mode first.");
 
             if (_session != null)
                 return ErrorJson("Already recording. Call recording.stop first.");
@@ -127,11 +131,11 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
 
         // ─── recording.stop ────────────────────────────────────────────────
-
         [MCPTool(MCPMethodConst.STOP_RECORDING,
             "Stop recording and finalize the MP4. "
             + "Returns immediately with status='encoding'. "
-            + "Poll recording.status for completion and output file path.")]
+            + "Poll recording.status for completion and output file path.",
+            Platform = MCPToolPlatforms.Android | MCPToolPlatforms.iOS | MCPToolPlatforms.Standalone)]
         public static string StopRecording(string paramsJson)
         {
             // Already completed (previous export still stored)
@@ -169,22 +173,11 @@ namespace SimpleMCPBridge.Runtime.Handlers
 
         [MCPTool(MCPMethodConst.GET_RECORDING_STATUS,
             "Get current recording/encoding status. "
-            + "States: idle | recording | encoding | completed | error.")]
+            + "States: idle | recording | encoding | completed | error.",
+            Platform = MCPToolPlatforms.Android | MCPToolPlatforms.iOS | MCPToolPlatforms.Standalone)]
         public static string GetStatus(string paramsJson)
         {
             var invariant = System.Globalization.CultureInfo.InvariantCulture;
-
-            // Stale state after exiting Play Mode (no domain reload)
-            if (!Application.isPlaying && _session != null)
-            {
-                DebugUtils.Log("[Recording] Cleaning up stale session from previous Play Mode.");
-                CleanupSession();
-                ResetState();
-                return JsonHelper.BuildJsonObject(
-                    ("isRecording", "false"),
-                    ("state", JsonHelper.EscapeString("idle"))
-                );
-            }
 
             // Currently recording
             if (_session != null && _exportTask == null)
@@ -253,25 +246,76 @@ namespace SimpleMCPBridge.Runtime.Handlers
 
         // ─── Async export ──────────────────────────────────────────────────
 
+        private const int EXPORT_TIMEOUT_SECONDS = 20;
+
         /// <summary>
         /// Completes the UnboundedRecordingSession and waits for the MP4 to be finalized.
         /// Runs on the Unity main thread (via default SynchronizationContext capture).
+        /// Has a built-in timeout to prevent hanging if the encoder stalls.
         /// Stores result in _lastExportPath / _lastError for polling by GetStatus.
         /// </summary>
         private static async Task ExportAsync()
         {
             try
             {
-                await _session.CompleteAsync();
+                // CompleteAsync returns non-generic ValueTask (no .AsTask() in .NET Standard 2.1).
+                // Bridge to Task via TaskCompletionSource for use with Task.WhenAny.
+                var vt = _session.CompleteAsync();
+                var tcs = new TaskCompletionSource<bool>();
+                vt.GetAwaiter().OnCompleted(() =>
+                {
+                    try
+                    {
+                        vt.GetAwaiter().GetResult(); // rethrow any exception
+                        tcs.TrySetResult(true);
+                    }
+                    catch (Exception ex)
+                    {
+                        tcs.TrySetException(ex);
+                    }
+                });
+                var completeTask = tcs.Task;
+
+                var timeoutTask = Task.Delay(TimeSpan.FromSeconds(EXPORT_TIMEOUT_SECONDS));
+                var completed = await Task.WhenAny(completeTask, timeoutTask);
+
+                if (completed == timeoutTask)
+                {
+                    _lastExportPath = null;
+                    _lastError = "Recording export timed out. The encoder may have stalled. Call recording.reset to recover.";
+                    CleanupSession();
+                    DebugUtils.LogError($"[Recording] {_lastError}");
+                    return;
+                }
+
+                // Propagate any exception from CompleteAsync
+                await completeTask;
                 _lastExportPath = _outputPath;
                 _lastError = null;
             }
             catch (Exception ex)
             {
-                _lastError = $"Recording export failed: {ex.Message}";
                 _lastExportPath = null;
+                _lastError = $"Recording export failed: {ex.Message}";
+                CleanupSession();
                 DebugUtils.LogError($"[Recording] {_lastError}");
             }
+        }
+
+        /// <summary>
+        /// Force-reset recording state. Use if export times out or gets stuck.
+        /// </summary>
+        [MCPTool("recording.reset", "Force-reset the recording system. Use if encoding gets stuck or times out. Cleans up all session state.",
+            Platform = MCPToolPlatforms.Android | MCPToolPlatforms.iOS | MCPToolPlatforms.Standalone)]
+        public static string ResetRecording(string paramsJson)
+        {
+            CleanupSession();
+            ResetState();
+            DebugUtils.Log("[Recording] Force reset by user request.");
+            return JsonHelper.BuildJsonObject(
+                ("success", "true"),
+                ("message", JsonHelper.EscapeString("Recording state reset. Previous session abandoned."))
+            );
         }
 
         // ─── State reset (required for enter Play Mode without domain reload) ─
@@ -366,3 +410,5 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
     }
 }
+
+

@@ -50,7 +50,7 @@ namespace SimpleMCPBridge
 
         /// <summary>
         /// 读取配置。
-        ///   Editor → Assets/SimpleMCPBridge/Resources/bridge-config.json（与 MCPBridgeWindow 同源
+        ///   Editor → 从项目文件 Assets/SimpleMCPBridge/bridge-config.json 读取
         ///   Player → Application.persistentDataPath/bridge-config.json
         /// 都不存在时回退到 Resources。
         /// </summary>
@@ -62,7 +62,7 @@ namespace SimpleMCPBridge
             string json = null;
 
 #if UNITY_EDITOR
-            // Editor: 与 MCPBridgeWindow 读取同一个项目文件
+            // Editor: 读取项目 Assets/SimpleMCPBridge/bridge-config.json
             string editorPath = Path.Combine(Application.dataPath, "SimpleMCPBridge", CONFIG_FILE);
             if (File.Exists(editorPath))
                 json = File.ReadAllText(editorPath);
