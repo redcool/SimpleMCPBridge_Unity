@@ -29,7 +29,7 @@ git clone https://github.com/redcool/SimpleMCPBridge_Unity.git
 安装后目录结构：
 ```
 Assets/
-├── SimpleMCPBridge/        ← 本仓库
+├── SimpleMCPBridge/        ← 本仓库（git clone）
 │   ├── Runtime/             # 运行时桥接代码
 │   │   ├── MCPBridge.cs     # 核心桥接类（plain C#，非 MonoBehaviour）
 │   │   ├── WebSocketClient.cs
@@ -40,16 +40,17 @@ Assets/
 │   │   │   └── FreshFrameProvider.cs # 自定义帧采集器（解决 ScreenshotFrameProvider 纹理重用竞态）
 │   │   └── Models/
 │   ├── Editor/              # Editor Window + 自动启动
+│   ├── Plugins/             # NuGet DLL 依赖（InstantReplay/UniEnc 需要）
+│   │   ├── System.IO.Pipelines.dll
+│   │   ├── System.Threading.Channels.dll
+│   │   └── System.Runtime.CompilerServices.Unsafe.dll
 │   ├── bridge-config.json   # IP/Port 配置
 │   └── AGENTS.md            # AI 开发指引
-├── Plugins/                # NuGet DLL 依赖（InstantReplay/UniEnc）
-│   ├── System.IO.Pipelines.dll
-│   ├── System.Threading.Channels.dll
-│   └── System.Runtime.CompilerServices.Unsafe.dll
 ├── ...
 ```
 
-> 注意：SimpleMCPBridge 是自己独立的 git 仓库，不是 Unity 项目的子模块。
+> 注意：SimpleMCPBridge 是自己独立的 git 仓库，不是 Unity 项目的子模块。  
+> Plugins DLL 已包含在仓库内（MIT 许可，微软 .NET 运行时库），clone 后无需手动下载。
 
 ## 使用方法
 
@@ -66,7 +67,7 @@ Bridge 生命周期独立于窗口：关闭窗口后 bridge 继续运行，进�
 - **Unity 2022.3+**（URP）
 - **[SimpleMcpServer](https://github.com/redcool/SimpleMCPServer)** — 需先 clone 并启动
 - **[CyberAgent InstantReplay](https://github.com/CyberAgentGameEntertainment/InstantReplay)** — 通过 UPM 安装（`jp.co.cyberagent.instant-replay`），用于录制 MP4
-- **Plugins 依赖 DLL** — `System.IO.Pipelines`、`System.Threading.Channels`、`System.Runtime.CompilerServices.Unsafe`（InstantReplay/UniEnc 的原生编码层需要）
+- **Plugins 依赖 DLL** — `System.IO.Pipelines`、`System.Threading.Channels`、`System.Runtime.CompilerServices.Unsafe` 已包含在 `SimpleMCPBridge/Plugins/` 中，clone 后自动可用
 
 ## 配置
 

@@ -33,7 +33,10 @@ namespace SimpleMCPBridge.Runtime
 
         /// <summary>
         /// Build a JSON object string from key-value pairs.
-        /// Values are automatically quoted as JSON strings.
+        /// WARNING: valueJson MUST already be valid JSON (pre-quoted strings, raw numbers/bools).
+        /// Use EscapeString() for string values — bare words like "state" produce invalid JSON.
+        /// Correct: ("action", JsonHelper.EscapeString("state"))
+        /// Wrong:   ("action", "state")
         /// </summary>
         public static string BuildJsonObject(params (string key, string valueJson)[] fields)
         {

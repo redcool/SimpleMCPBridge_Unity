@@ -54,7 +54,7 @@ server keeps only the most recent one.
 - **Server stderr:** `SimpleMcpServer/server.err`
 - **Unity Editor log:** `$env:LOCALAPPDATA\Unity\Editor\Editor.log`
 
-## Tools (54)
+## Tools (53)
 
 | Tool | What it does | Platform |
 |------|-------------|----------|
@@ -102,6 +102,9 @@ server keeps only the most recent one.
 | `input.mouse_click` | Simulate mouse click at normalized screen position (Input System) | All |
 | `input.mouse_move` | Move mouse by pixel delta (camera look/aim) (Input System) | All |
 | `input.key_press` | Simulate keyboard key — tap/hold/release (Input System) | All |
+| `input.touch` | Touch simulation: tap, start, move, end (virtual Touchscreen, Input System) | All |
+| `input.swipe` | Async smooth swipe/drag gesture from one point to another over time | All |
+| `input.gamepad` | Gamepad control: button tap/press/release, axis, batch set, reset, state query | All |
 | `input.action` | Unified input: keys + mouse + axes + scroll in one call | All |
 | `ui.get_texts` | Read on-screen UI text from memory (no OCR) — Text + TMP | All |
 | `ui.find` | Find interactive UI elements with screen positions + state | All |
@@ -212,4 +215,106 @@ compilation error — check `editor.get_console` for details.
 | `Runtime/MCPToolRegistry.cs` | Auto-discovery + registration + platform filter |
 | `Editor/MCPBridgeWindow.cs` | Tools > SimpleMCPBridge window |
 | `Editor/AutoStartBridge.cs` | Auto-connect on domain reload |
+| `Plugins/` | NuGet DLL 依赖（InstantReplay/UniEnc 需要，已含在仓库内）|
 | `bridge-config.json` | Bridge IP/port |
+
+## Input Tool Parameter Reference
+
+### `input.key_press` — 键盘模拟 (Input System)
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `key` | string | 是* | 键名: `w`, `space`, `enter`, `upArrow`, `leftShift`, `f1` 等 |
+| `action` | string | 否 (默认 `tap`) | `tap` = 按下立即释放; `hold` = 持续按住; `release` = 释放 |
+
+- `action="release"` + `key` 省略或 `"*"` → 释放所有按键
+- **WASD 连续移动**: `hold` 按住 → 等待 → `release` 释放（`tap` 太快，PlayerMove 读不到）
+- 底层: `InputSystem.QueueStateEvent(Keyboard.current, ...)` — 不调用 `InputSystem.Update()`
+- 事件在 Unity 原生 Input System update 周期中被处理
+
+### `input.gamepad` — 虚拟手柄 (Input System)
+
+| `action` | 必填参数 | 说明 |
+|----------|---------|------|
+| `button` | `button`, `press`(tap/press/release) | 按钮操作 |
+| `axis` | `axis`, `value`(-1..1) | 设置摇杆轴值 |
+| `set` | `buttons`[], `axes`{} | 批量操作 |
+| `reset` | — | 全部归零 |
+| `state` | — | 查询当前状态 |
+
+- Button names: `south`/`a`, `east`/`b`, `north`/`x`, `west`/`y`, `leftShoulder`/`lb` 等
+- Axis names: `leftStickX`, `leftStickY`, `rightStickX`, `rightStickY`, `leftTrigger`, `rightTrigger`
+- 底层: `InputSystem.QueueStateEvent(Gamepad.current, GamepadState{...})`
+
+### `scene.*` 组件操作 — 参数名是 `componentType`
+
+> ⚠️ **不是 `component`，是 `componentType`！**
+
+| 工具 | 必填参数 |
+|------|---------|
+| `scene.get_component_properties` | `instanceId`\|`path` + `componentType` |
+| `scene.set_component_property` | `instanceId`\|`path` + `componentType` + `propertyName` + `value` |
+| `scene.add_component` | `instanceId`\|`path` + `componentType` |
+| `scene.remove_component` | `instanceId`\|`path` + `componentType` |
+| `scene.get_components` | `instanceId`\|`path`（不需要 `componentType`） |
+
+例外: `game.wait` 的组件参数名是 `component`（不一致，但已固化）。
+
+## Multi-Bridge 路由
+
+服务器支持多个 bridge 同时连接（如 Editor + Android）。
+
+- 路由规则: **last-registration-wins** — 后连接的 bridge 覆盖同名工具的前一个注册
+- Editor bridge (53 tools) 先连接 → Android bridge (35 tools) 后连接 → Android 覆盖重叠工具
+- 两个 bridge 都有 `scene.set_transform` → 调用路由到 **Android**（后注册者）
+- 录屏工具 (`recording.*`) 只在 Android bridge 注册（`Platform = Android | iOS | Standalone`）
+- 验证路由目标: `scene.get_hierarchy` 返回 flat array `[...]` = Android; 返回 `{"value":[...],"Count":N}` = Editor
+
+## Android Runtime Testing
+
+已在 Android 设备 (V2073A, OpenGL ES 3.0) 上验证通过的工具:
+
+| 工具 | 验证内容 |
+|------|---------|
+| `input.key_press` | WASD hold/release → Player 走一圈 ✅ |
+| `input.touch` | tap/start/move/end 全部 ✅ |
+| `input.swipe` | 滑动手势 ✅ |
+| `input.gamepad` | state/button/axis/set/reset 全部 ✅ |
+| `input.click_screen` | 狂点中心 Button ×10 ✅ |
+| `input.mouse_click` | 归一化坐标点击 ✅ |
+| `scene.set_transform` | position + rotation（Cube 旋转 10×15°）✅ |
+| `scene.get_component_properties` | `componentType` 参数 → Transform 37 属性 ✅ |
+| `recording.start/stop/status` | MP4 录屏 → 编码 → 导出 ✅ |
+
+### 自动化测试脚本
+
+| 脚本 | 路径 | 内容 |
+|------|------|------|
+| Android 全流程 | `SimpleMcpServer/tests/auto-test-android.ps1` | 录屏→走原点→点按钮→旋转Cube→移动Sphere→停录屏 |
+| Cube 旋转录屏 | 内联 PowerShell | 录屏→Cube 10×15°→停录屏（800ms 间隔）|
+
+运行: `H:\ai_works\SimpleMcpServer\tests\auto-test-android.ps1`
+
+## Known Issues
+
+### 1. MPEG4Writer "Stop() called but track is not started" (Android 录屏)
+
+**现象**: logcat 出现 `Error MPEG4Writer Stop() called but track is not started or stopped`
+
+**根因**: InstantReplay 库的 `UnboundedRecordingSession` **永远创建音频轨道**（`EncodingSystem.CreateAudioEncoder()` + `MuxerAudioInput`），即使 `enableAudio=false`。音频轨道在 MP4 容器中被创建但从未收到编码帧，`CompleteAsync()` 停止一个未启动的轨道 → MPEG4Writer 报错。
+
+**不能设 `AudioOptions = null`**: `UnboundedRecordingSession` 构造函数 line 125 直接访问 `options.AudioOptions.SampleRate` → NullReferenceException。
+
+**影响**: 无害。MP4 视频轨道完整，播放正常，只是没有音频。
+
+### 2. `BuildJsonObject` 字符串值必须预引号
+
+`JsonHelper.BuildJsonObject(("key", "value"))` 生成 `"key":value`（裸词，无效 JSON）。字符串值必须通过 `JsonHelper.EscapeString("value")` 包装: `("key", JsonHelper.EscapeString("value"))` → `"key":"value"`。数值和 bool 不需要包装。
+
+### 3. `InputSystem.Update()` 在 Play Mode 阻塞
+
+输入工具（gamepad/touch/key_press）使用 `InputSystem.QueueStateEvent()` 但不调用 `InputSystem.Update()`。事件由 Unity 原生 player loop 处理。曾尝试在 `GamepadTools.ApplyState()` 中调用 `InputSystem.Update()` 导致 Play Mode 阻塞，已移除。
+
+### 4. 服务器日志无工具名（已修复）
+
+工具调用和响应日志现在包含工具名: `Calling tool 'input.gamepad' → bridge [xxx]` 和 `Received tool response tool='input.gamepad'`。

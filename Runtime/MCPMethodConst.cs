@@ -107,6 +107,12 @@ namespace SimpleMCPBridge.Runtime
         public const string MOUSE_MOVE = "input.mouse_move";
         /// <summary>模拟键盘按键（通过 Input System 低层级事件队列到物理键盘）。</summary>
         public const string KEY_PRESS = "input.key_press";
+        /// <summary>触屏模拟：单击 / 开始触摸 / 移动 / 结束触摸（通过 Input System 虚拟触屏）。</summary>
+        public const string TOUCH = "input.touch";
+        /// <summary>滑动手势：起点→终点，异步多帧平滑执行。</summary>
+        public const string SWIPE = "input.swipe";
+        /// <summary>手柄输入：按钮 / 摇杆 / 扳机（通过 Input System 虚拟手柄）。</summary>
+        public const string GAMEPAD = "input.gamepad";
 
         // ── 物理工具 ──
         /// <summary>从指定位置发射射线检测碰撞。</summary>

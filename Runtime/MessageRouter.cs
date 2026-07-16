@@ -80,19 +80,15 @@ namespace SimpleMCPBridge.Runtime
 
         private string BuildErrorResponse(string requestId, string errorMessage)
         {
-            var response = new MCPResponse
-            {
-                id = requestId,
-                result = null,
-                error = errorMessage
-            };
-            return JsonUtility.ToJson(response);
+            // JSON-RPC 2.0: error response MUST NOT include "result" field.
+            return $@"{{""id"":{JsonHelper.EscapeString(requestId ?? "")},""error"":{JsonHelper.EscapeString(errorMessage)}}}";
         }
 
         private string BuildSuccessResponse(string requestId, string resultJson)
         {
             // Build manually so result is embedded as raw JSON, not an escaped string.
-            return $@"{{""id"":{JsonHelper.EscapeString(requestId ?? "")},""result"":{resultJson ?? "null"},""error"":null}}";
+            // JSON-RPC 2.0: success response MUST NOT include "error" field.
+            return $@"{{""id"":{JsonHelper.EscapeString(requestId ?? "")},""result"":{resultJson ?? "null"}}}";
         }
     }
 }
