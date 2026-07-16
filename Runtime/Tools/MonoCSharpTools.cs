@@ -175,37 +175,32 @@ namespace SimpleMCPBridge
 
         /// <summary>
         /// Evaluate a C# expression or execute a statement.
-        /// Returns the result object (null for statements).
+        /// Returns the result object (null for statements, null for void expressions).
+        /// Strategy:
+        ///   1. Try Mono.CSharp Evaluate() first — works for pure expressions,
+        ///      does NOT corrupt evaluator state on failure.
+        ///   2. If Evaluate() doesn't produce a result, use Run() to execute as statement.
         /// </summary>
         public static object Evaluate(string code)
         {
             var _ = Evaluator; // triggers lazy init (populates thread-static delegates)
             var cleanCode = code.TrimEnd().TrimEnd(';');
 
-            // Step 1: reset result holder
-            _run("__MCP_Result__ = null;");
-
-            // Step 2: try to evaluate as expression via assignment wrapper
+            // Step 1: try Evaluate as expression (non-destructive — doesn't corrupt state)
             try
             {
-                _run("__MCP_Result__ = " + cleanCode + ";");
+                _eval3(cleanCode, out var result, out var resultSet);
+                if (resultSet)
+                    return result;
             }
             catch
             {
-                // True statement — run as-is
-                _run(code);
+                // Evaluate() threw — not a valid expression either
             }
 
-            // Step 3: read __MCP_Result__
-            try
-            {
-                _eval3("__MCP_Result__", out var result, out bool _);
-                return result;
-            }
-            catch
-            {
-                return null;
-            }
+            // Step 2: not an expression (or Evaluate unavailable) — run as statement
+            _run(code);
+            return null;
         }
 
         /// <summary>

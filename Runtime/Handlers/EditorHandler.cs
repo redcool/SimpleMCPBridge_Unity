@@ -3,6 +3,7 @@ using SimpleMCPBridge;
 using SimpleMCPBridge.Runtime;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -31,13 +32,11 @@ namespace SimpleMCPBridge.Runtime.Handlers
             var args = ParseJsonObject(paramsJson);
             var action = GetRequiredString(args, "action").ToLowerInvariant();
 
-            var hWnd = Win32Tools.GetWindowHandle();
-            if (hWnd == IntPtr.Zero)
-                return ErrorJson("Could not find Unity Editor window handle");
+            var hWnd = WindowTools.GetWindowHandle();
 
             if (action == "get_state")
             {
-                var state = Win32Tools.GetWindowState(hWnd);
+                var state = WindowTools.GetWindowState(hWnd);
                 return JsonHelper.BuildJsonObject(
                     ("success", "true"),
                     ("action", JsonHelper.EscapeString("get_state")),
@@ -48,16 +47,16 @@ namespace SimpleMCPBridge.Runtime.Handlers
             switch (action)
             {
                 case "minimize":
-                    Win32Tools.Minimize(hWnd);
+                    WindowTools.Minimize(hWnd);
                     return JsonHelper.BuildJsonObject(("success", "true"), ("action", JsonHelper.EscapeString("minimize")));
                 case "restore":
-                    Win32Tools.Restore(hWnd);
+                    WindowTools.Restore(hWnd);
                     return JsonHelper.BuildJsonObject(("success", "true"), ("action", JsonHelper.EscapeString("restore")));
                 case "focus":
-                    Win32Tools.Focus(hWnd);
+                    WindowTools.Focus(hWnd);
                     return JsonHelper.BuildJsonObject(("success", "true"), ("action", JsonHelper.EscapeString("focus")));
                 case "maximize":
-                    Win32Tools.Maximize(hWnd);
+                    WindowTools.Maximize(hWnd);
                     return JsonHelper.BuildJsonObject(("success", "true"), ("action", JsonHelper.EscapeString("maximize")));
                 default:
                     return ErrorJson($"Unknown action '{action}'. Use 'minimize', 'restore', 'focus', 'maximize', or 'get_state'.");
@@ -142,7 +141,8 @@ namespace SimpleMCPBridge.Runtime.Handlers
         [MCPTool(MCPMethodConst.GET_CONSOLE,
             "Get recent Editor console log entries. " +
             "Params: count (int, optional, default 50) — max entries to return. " +
-            "Returns array of { message, stackTrace, type, time }. " +
+            "Returns object with { entries: [...], count: N }. " +
+            "Each entry: { message, stackTrace, type, time }. " +
             "Type values: Log, Warning, Error, Exception, Assert.")]
         public static string GetConsole(string paramsJson)
         {
@@ -150,16 +150,22 @@ namespace SimpleMCPBridge.Runtime.Handlers
             var count = (int)GetOptionalInt(args, "count").GetValueOrDefault(50);
             count = Mathf.Clamp(count, 1, CONSOLE_CACHE_SIZE);
 
+            List<ConsoleEntry> entries;
             lock (_consoleCache)
             {
-                var entries = _consoleCache.Skip(Math.Max(0, _consoleCache.Count - count)).ToList();
-                var jsonEntries = new List<string>();
-                foreach (var e in entries)
-                {
-                    jsonEntries.Add($@"{{""message"":{JsonHelper.EscapeString(e.message)},""stackTrace"":{JsonHelper.EscapeString(e.stackTrace)},""type"":{JsonHelper.EscapeString(e.type)},""time"":{JsonHelper.EscapeString(e.time)}}}");
-                }
-                return $"[{string.Join(",", jsonEntries)}]";
+                entries = _consoleCache.Skip(Math.Max(0, _consoleCache.Count - count)).ToList();
             }
+
+            var jsonEntries = new List<string>();
+            foreach (var e in entries)
+            {
+                jsonEntries.Add($@"{{""message"":{JsonHelper.EscapeString(e.message)},""stackTrace"":{JsonHelper.EscapeString(e.stackTrace)},""type"":{JsonHelper.EscapeString(e.type)},""time"":{JsonHelper.EscapeString(e.time)}}}");
+            }
+            return JsonHelper.BuildJsonObject(
+                ("success", "true"),
+                ("count", entries.Count.ToString(CultureInfo.InvariantCulture)),
+                ("entries", $"[{string.Join(",", jsonEntries)}]")
+            );
         }
 
         // ─── editor.undo / editor.redo ────────────────────────────────────

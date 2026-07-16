@@ -133,6 +133,89 @@ namespace SimpleMCPBridge.Runtime.Handlers
         //    return ProcessClick(args["x"], args["y"], 0);
         //}
 
+        // ── 鼠标移动 ──
+
+        [MCPTool(MCPMethodConst.MOUSE_MOVE, "Move mouse by pixel delta (for camera look/aim). " +
+            "Params: 'dx' (float, required) — horizontal delta in pixels (positive = right), " +
+            "'dy' (float, required) — vertical delta in pixels (positive = up). " +
+            "Preserves current button states so held clicks aren't interrupted. " +
+            "Typical values: (dx=50, dy=0) = look right, (dx=0, dy=-30) = look up. " +
+            "Uses InputSystem.QueueStateEvent on the physical mouse device.")]
+        public static string MouseMove(string paramsJson)
+        {
+            var args = ParseJsonObject(paramsJson);
+            var dx = GetRequiredFloat(args, "dx");
+            var dy = GetRequiredFloat(args, "dy");
+
+            MouseDeviceTools.MoveMouse(new Vector2(dx, dy));
+
+            return JsonHelper.BuildJsonObject(
+                ("success", "true"),
+                ("dx", dx.ToString(CultureInfo.InvariantCulture)),
+                ("dy", dy.ToString(CultureInfo.InvariantCulture))
+            );
+        }
+
+        // ── 键盘模拟 ──
+
+        [MCPTool(MCPMethodConst.KEY_PRESS, "Simulate keyboard key press/release. " +
+            "Params: 'key' (string, required) — key name such as 'w', 'space', 'enter', 'upArrow', " +
+            "'leftShift', 'f1'. " +
+            "'action' (string, optional, default 'tap') — one of: " +
+            "'tap' = press + immediate release (for jumps, shooting, interactions), " +
+            "'hold' = press and keep pressed (for WASD movement), " +
+            "'release' = release a held key (use key='*' or omit key to release ALL keys). " +
+            "Uses InputSystem.QueueStateEvent on the physical keyboard device. " +
+            "Works in both Editor Play Mode and Runtime builds with Input System package.")]
+        public static string KeyPress(string paramsJson)
+        {
+            var args = ParseJsonObject(paramsJson);
+            var keyName = GetString(args, "key", "");
+            var action = GetString(args, "action", "tap");
+
+            // Release all: key omitted, empty, or "*"
+            if (action == "release" && (string.IsNullOrEmpty(keyName) || keyName == "*"))
+            {
+                KeyboardTools.ReleaseAllKeys();
+                return JsonHelper.BuildJsonObject(
+                    ("success", "true"),
+                    ("action", "release_all")
+                );
+            }
+
+            if (string.IsNullOrEmpty(keyName))
+                return ErrorJson("Missing required parameter: 'key'");
+
+            var key = KeyboardTools.ParseKey(keyName);
+
+            switch (action)
+            {
+                case "tap":
+                    KeyboardTools.TapKey(key);
+                    return JsonHelper.BuildJsonObject(
+                        ("success", "true"),
+                        ("action", "tap"),
+                        ("key", JsonHelper.EscapeString(keyName))
+                    );
+                case "hold":
+                    KeyboardTools.HoldKey(key);
+                    return JsonHelper.BuildJsonObject(
+                        ("success", "true"),
+                        ("action", "hold"),
+                        ("key", JsonHelper.EscapeString(keyName))
+                    );
+                case "release":
+                    KeyboardTools.ReleaseKey(key);
+                    return JsonHelper.BuildJsonObject(
+                        ("success", "true"),
+                        ("action", "release"),
+                        ("key", JsonHelper.EscapeString(keyName))
+                    );
+                default:
+                    return ErrorJson($"Unknown action: '{action}'. Use 'tap', 'hold', or 'release'.");
+            }
+        }
+
         // ── Helpers ──
 
         public static float GetRequiredFloat(Dictionary<string, object> dict, string key)

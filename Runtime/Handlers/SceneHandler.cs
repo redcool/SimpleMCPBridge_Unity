@@ -1,4 +1,4 @@
-using SimpleMCPBridge;
+﻿using SimpleMCPBridge;
 using SimpleMCPBridge.Runtime;
 using SimpleMCPBridge.Runtime.Models;
 using System;
@@ -36,40 +36,12 @@ namespace SimpleMCPBridge.Runtime.Handlers
             var entries = new List<string>();
             foreach (var root in rootObjects)
             {
-                entries.Add(BuildTreeEntry(root, root.name));
+                entries.Add(SceneObjectTools.BuildTreeEntry(root, root.name));
             }
             return JsonHelper.BuildJsonArray(entries.ToArray());
         }
 
-        public static string BuildTreeEntry(GameObject go, string path)
-        {
-            // Collect component names
-            var components = go.GetComponents<Component>();
-            var compNames = new List<string>();
-            foreach (var c in components)
-            {
-                if (c != null)
-                    compNames.Add(c.GetType().Name);
-            }
 
-            // Collect children
-            var childJsons = new List<string>();
-            foreach (Transform child in go.transform)
-            {
-                childJsons.Add(BuildTreeEntry(child.gameObject, path + "/" + child.name));
-            }
-
-            var pos = go.transform.position;
-            return JsonHelper.BuildJsonObject(
-                ("instanceId", go.GetInstanceID().ToString(CultureInfo.InvariantCulture)),
-                ("path", JsonHelper.EscapeString(path)),
-                ("name", JsonHelper.EscapeString(go.name)),
-                ("active", JsonHelper.BoolJson(go.activeSelf)),
-                ("position", JsonHelper.FloatArrayJson(new[] { pos.x, pos.y, pos.z })),
-                ("components", JsonHelper.StringArrayJson(compNames.ToArray())),
-                ("children", JsonHelper.BuildJsonArray(childJsons.ToArray()))
-            );
-        }
 
         [MCPTool(MCPMethodConst.GET_OBJECTS, "Find GameObjects in the scene by optional name filter — returns instanceId + path for each. " +
             "If nameContains contains '/', it is treated as a transform path (e.g. 'Canvas/Button').")]
@@ -188,7 +160,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             var scaleArr = GetOptionalFloatArray(args, "scale");
 
             var go = new GameObject(name);
-            UndoRegisterCreated(go, $"Create {name}");
+            SceneObjectTools.UndoRegisterCreated(go, $"Create {name}");
 
             var parent = ResolveParentTarget(args);
             if (parent != null)
@@ -213,7 +185,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             if (go == null)
                 return ErrorJson("Object not found. Provide 'instanceId' or 'path'.");
 
-            UndoDestroyObject(go);
+            SceneObjectTools.UndoDestroyObject(go);
             return JsonHelper.BuildJsonObject(("success", "true"));
         }
 
@@ -232,7 +204,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             var space = GetString(args, "space", "world").ToLowerInvariant();
             var isLocal = space == "local";
 
-            UndoRecord(go.transform, "Set Transform");
+            SceneObjectTools.UndoRecord(go.transform, "Set Transform");
             if (posArr != null && posArr.Length >= 3)
             {
                 var pos = new Vector3(posArr[0], posArr[1], posArr[2]);
@@ -273,8 +245,8 @@ namespace SimpleMCPBridge.Runtime.Handlers
             var field = component.GetType().GetField(propertyName, flags);
             if (field != null)
             {
-                UndoRecord(component, $"Set {propertyName}");
-                var typedValue = ConvertValue(rawValue, field.FieldType);
+                SceneObjectTools.UndoRecord(component, $"Set {propertyName}");
+                var typedValue = SceneObjectTools.ConvertValue(rawValue, field.FieldType);
                 field.SetValue(component, typedValue);
                 return JsonHelper.BuildJsonObject(("success", "true"));
             }
@@ -283,8 +255,8 @@ namespace SimpleMCPBridge.Runtime.Handlers
             var prop = component.GetType().GetProperty(propertyName, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
             if (prop != null && prop.CanWrite)
             {
-                UndoRecord(component, $"Set {propertyName}");
-                var typedValue = ConvertValue(rawValue, prop.PropertyType);
+                SceneObjectTools.UndoRecord(component, $"Set {propertyName}");
+                var typedValue = SceneObjectTools.ConvertValue(rawValue, prop.PropertyType);
                 prop.SetValue(component, typedValue);
                 return JsonHelper.BuildJsonObject(("success", "true"));
             }
@@ -295,8 +267,8 @@ namespace SimpleMCPBridge.Runtime.Handlers
             field = component.GetType().GetField(altName, flags);
             if (field != null)
             {
-                UndoRecord(component, $"Set {propertyName}");
-                var typedValue = ConvertValue(rawValue, field.FieldType);
+                SceneObjectTools.UndoRecord(component, $"Set {propertyName}");
+                var typedValue = SceneObjectTools.ConvertValue(rawValue, field.FieldType);
                 field.SetValue(component, typedValue);
                 return JsonHelper.BuildJsonObject(("success", "true"));
             }
@@ -405,7 +377,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
 
             var active = GetRequiredBool(args, "active");
 
-            UndoRecord(go, "Set Active");
+            SceneObjectTools.UndoRecord(go, "Set Active");
             go.SetActive(active);
             return JsonHelper.BuildJsonObject(("success", "true"));
         }
@@ -418,7 +390,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             if (go == null) return ErrorJson("Object not found. Provide 'instanceId' or 'path'.");
 
             var clone = Object.Instantiate(go);
-            UndoRegisterCreated(clone, $"Duplicate {go.name}");
+            SceneObjectTools.UndoRegisterCreated(clone, $"Duplicate {go.name}");
             clone.name = go.name + " (Copy)";
             var ref_ = UnityObjectRef.FromGameObject(clone);
             return JsonUtility.ToJson(ref_);
@@ -433,7 +405,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
 
             var name = GetRequiredString(args, "name");
 
-            UndoRecord(go, "Rename");
+            SceneObjectTools.UndoRecord(go, "Rename");
             go.name = name;
             return JsonHelper.BuildJsonObject(("success", "true"));
         }
@@ -445,7 +417,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             var go = ResolveTarget(args);
             if (go == null) return ErrorJson("Object not found. Provide 'instanceId' or 'path'.");
 
-            UndoRecord(go.transform, "Set Parent");
+            SceneObjectTools.UndoRecord(go.transform, "Set Parent");
 
             var parent = ResolveParentTarget(args);
             if (parent != null)
@@ -471,7 +443,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
                 {
                     if (type.Name == componentType && type.IsSubclassOf(typeof(Component)) && !type.IsAbstract)
                     {
-                        UndoAddComponent(go, type);
+                        SceneObjectTools.UndoAddComponent(go, type);
                         return JsonHelper.BuildJsonObject(("success", "true"));
                     }
                 }
@@ -539,12 +511,34 @@ namespace SimpleMCPBridge.Runtime.Handlers
             return JsonHelper.BuildJsonObject(("success", "true"));
         }
 
-        [MCPTool(MCPMethodConst.REQUEST_COMPILE, "Request Unity to recompile all scripts (useful after editing C# files externally via filesystem)")]
+        [MCPTool(MCPMethodConst.REQUEST_COMPILE, "Request Unity to recompile all scripts. " +
+            "Ensures compilation by minimizing/restoring the Editor window first " +
+            "(triggers Unity's event processing which is required for compilation to start reliably).")]
         public static string RequestCompile(string paramsJson)
         {
-            // Force reimport of changed scripts before requesting compilation
-            UnityEditor.AssetDatabase.Refresh();
-            UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation();
+            var hWnd = WindowTools.GetWindowHandle();
+
+            // Step 1: Minimize (lose focus → force Unity to process pending events)
+            WindowTools.Minimize(hWnd);
+
+            // Step 2: After 300ms, restore and request compilation
+            double startTime = UnityEditor.EditorApplication.timeSinceStartup;
+            UnityEditor.EditorApplication.update += OnPostMinimize;
+
+            void OnPostMinimize()
+            {
+                if (UnityEditor.EditorApplication.timeSinceStartup - startTime < 0.3)
+                    return;
+                UnityEditor.EditorApplication.update -= OnPostMinimize;
+
+                // Step 3: Restore window (refocus)
+                WindowTools.Restore(hWnd);
+
+                // Step 4: Force reimport and request compilation
+                UnityEditor.AssetDatabase.Refresh();
+                UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation();
+            }
+
             return JsonHelper.BuildJsonObject(("success", "true"));
         }
 
@@ -726,100 +720,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             return null;
         }
 
-        public static object ConvertValue(object rawValue, Type targetType)
-        {
-            if (rawValue == null)
-                return targetType.IsValueType ? Activator.CreateInstance(targetType) : null;
 
-            var rawStr = rawValue.ToString();
-
-            if (targetType == typeof(float)) return Convert.ToSingle(rawValue, CultureInfo.InvariantCulture);
-            if (targetType == typeof(double)) return Convert.ToDouble(rawValue, CultureInfo.InvariantCulture);
-            if (targetType == typeof(int)) return Convert.ToInt32(rawValue, CultureInfo.InvariantCulture);
-            if (targetType == typeof(long)) return Convert.ToInt64(rawValue, CultureInfo.InvariantCulture);
-            if (targetType == typeof(bool)) return Convert.ToBoolean(rawValue);
-            if (targetType == typeof(string)) return rawValue.ToString();
-            if (targetType == typeof(Vector2))
-            {
-                var v2 = ToFloatArray(rawValue);
-                if (v2 != null && v2.Length >= 2)
-                    return new Vector2(v2[0], v2[1]);
-                return Vector2.zero;
-            }
-            if (targetType == typeof(Vector3))
-            {
-                var v3 = ToFloatArray(rawValue);
-                if (v3 != null && v3.Length >= 3)
-                    return new Vector3(v3[0], v3[1], v3[2]);
-                return Vector3.zero;
-            }
-            if (targetType == typeof(Vector4))
-            {
-                var v4 = ToFloatArray(rawValue);
-                if (v4 != null && v4.Length >= 4)
-                    return new Vector4(v4[0], v4[1], v4[2], v4[3]);
-                return Vector4.zero;
-            }
-            if (targetType == typeof(Quaternion))
-            {
-                var vq = ToFloatArray(rawValue);
-                if (vq != null && vq.Length >= 4)
-                    return new Quaternion(vq[0], vq[1], vq[2], vq[3]);
-                return Quaternion.identity;
-            }
-            if (targetType == typeof(Color))
-            {
-                var vc = ToFloatArray(rawValue);
-                if (vc != null && vc.Length >= 4)
-                    return new Color(vc[0], vc[1], vc[2], vc[3]);
-                if (vc != null && vc.Length >= 3)
-                    return new Color(vc[0], vc[1], vc[2], 1f);
-                return Color.white;
-            }
-            if (targetType.IsEnum)
-            {
-                return Enum.Parse(targetType, rawStr, ignoreCase: true);
-            }
-
-            // Fallback: try string conversion
-            return Convert.ChangeType(rawValue, targetType, CultureInfo.InvariantCulture);
-        }
-
-        // ──────────────────────────────────────────────
-        //  Undo helpers (no-op outside Editor)
-        // ──────────────────────────────────────────────
-
-        public static void UndoRecord(Object target, string label)
-        {
-#if UNITY_EDITOR
-            UnityEditor.Undo.RecordObject(target, $"[MCP] {label}");
-#endif
-        }
-
-        public static void UndoRegisterCreated(GameObject go, string label)
-        {
-#if UNITY_EDITOR
-            UnityEditor.Undo.RegisterCreatedObjectUndo(go, $"[MCP] {label}");
-#endif
-        }
-
-        public static void UndoDestroyObject(GameObject go)
-        {
-#if UNITY_EDITOR
-            UnityEditor.Undo.DestroyObjectImmediate(go);
-#else
-            Object.DestroyImmediate(go);
-#endif
-        }
-
-        public static Component UndoAddComponent(GameObject go, Type type)
-        {
-#if UNITY_EDITOR
-            return UnityEditor.Undo.AddComponent(go, type);
-#else
-            return go.AddComponent(type);
-#endif
-        }
 
 #if UNITY_EDITOR
         // ── Asset tools (Editor only) ──
@@ -838,7 +739,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
                 return ErrorJson($"Prefab not found at path: {assetPath}");
 
             var go = Object.Instantiate(prefab);
-            UndoRegisterCreated(go, $"Instantiate {prefab.name}");
+            SceneObjectTools.UndoRegisterCreated(go, $"Instantiate {prefab.name}");
 
             if (posArr != null && posArr.Length >= 3)
                 go.transform.position = new Vector3(posArr[0], posArr[1], posArr[2]);
@@ -871,7 +772,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
                 return ErrorJson($"Material index {materialIndex} out of range (0-{renderer.sharedMaterials.Length - 1})");
 
             var mat = renderer.sharedMaterials[materialIndex];
-            UndoRecord(mat, "Set Material");
+            SceneObjectTools.UndoRecord(mat, "Set Material");
 
             if (colorArr != null && colorArr.Length >= 3)
             {

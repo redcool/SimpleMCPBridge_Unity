@@ -69,7 +69,7 @@ namespace SimpleMCPBridge
             InputSystem.Update();
         }
         /// <summary>
-        /// Trigger Click event with virtualMouse, need focus Game window
+        /// Trigger Click event with Mouse, need focus Game window
         /// </summary>
         /// <param name="screenUV"></param>
         /// <param name="buttonId"></param>
@@ -88,6 +88,35 @@ namespace SimpleMCPBridge
 
             mouseState.buttons = 0; // Release the button
             InputSystem.QueueStateEvent(Mouse.current, mouseState);
+            InputSystem.Update();
+        }
+
+        /// <summary>
+        /// Move mouse by pixel delta (for camera look/aim).
+        /// Preserves current button states so held clicks aren't interrupted.
+        /// Delta values are raw pixel offsets — typical look: (50, 0) = look right,
+        /// (0, -30) = look up.
+        /// </summary>
+        public static void MoveMouse(Vector2 delta)
+        {
+            var mouse = Mouse.current;
+            if (mouse == null)
+                throw new System.InvalidOperationException("No physical mouse device found (Mouse.current is null)");
+
+            // Preserve current button states
+            uint buttons = 0;
+            if (mouse.leftButton.isPressed) buttons |= 1;
+            if (mouse.rightButton.isPressed) buttons |= 2;
+            if (mouse.middleButton.isPressed) buttons |= 4;
+
+            var mouseState = new MouseState
+            {
+                position = mouse.position.ReadValue(),
+                delta = delta,
+                buttons = (ushort)buttons,
+            };
+
+            InputSystem.QueueStateEvent(mouse, mouseState);
             InputSystem.Update();
         }
     }

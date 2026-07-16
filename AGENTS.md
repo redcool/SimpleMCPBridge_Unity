@@ -54,7 +54,7 @@ server keeps only the most recent one.
 - **Server stderr:** `SimpleMcpServer/server.err`
 - **Unity Editor log:** `$env:LOCALAPPDATA\Unity\Editor\Editor.log`
 
-## Tools (46)
+## Tools (54)
 
 | Tool | What it does | Platform |
 |------|-------------|----------|
@@ -100,6 +100,14 @@ server keeps only the most recent one.
 | `editor.get_project_tree` | Get Assets directory tree (folders + files + sizes) | Editor |
 | `input.click_screen` | Simulate click at normalized screen position (EventSystem) | All |
 | `input.mouse_click` | Simulate mouse click at normalized screen position (Input System) | All |
+| `input.mouse_move` | Move mouse by pixel delta (camera look/aim) (Input System) | All |
+| `input.key_press` | Simulate keyboard key — tap/hold/release (Input System) | All |
+| `input.action` | Unified input: keys + mouse + axes + scroll in one call | All |
+| `ui.get_texts` | Read on-screen UI text from memory (no OCR) — Text + TMP | All |
+| `ui.find` | Find interactive UI elements with screen positions + state | All |
+| `game.get_state` | Composite scene/time/UI/player perception snapshot | All |
+| `game.wait` | Async wait: seconds, scene load, UI appear/disappear, component property | All |
+| `game.wait_check` | Poll game.wait completion status | All |
 | `recording.start` | Start recording via InstantReplay (Android only, Play Mode) | Android |
 | `recording.stop` | Stop recording and finalize MP4 (async, poll status) | Android |
 | `recording.status` | Get current recording/export state | Android |
@@ -167,6 +175,22 @@ instance — the bridge must reconnect to the new one.
 | `dist/` | Build output (gitignored) |
 | `config.json` | Server ip/port |
 
+## Compilation Trigger
+
+Single call to trigger Unity script recompilation:
+
+```
+editor.request_compile
+```
+
+That's it. Internally it: minimize → wait 300ms → restore → force refresh +
+request compilation. No need for manual `window_focus` calls.
+
+Typical timing: DLL rebuilt in ~3s, bridge reconnected in ~6s after the call.
+
+If `SimpleMCPBridge.dll` was deleted and not recreated, Unity has a
+compilation error — check `editor.get_console` for details.
+
 ## Directory Refs (from Assets/SimpleMCPBridge)
 
 | Path | Description |
@@ -175,6 +199,9 @@ instance — the bridge must reconnect to the new one.
 | `Runtime/WebSocketClient.cs` | Raw TCP WS client, frame read/write, HTTP upgrade |
 | `Runtime/MessageRouter.cs` | Routes tool calls to handlers |
 | `Runtime/MCPToolRegistry.cs` | Scans for [MCPTool] methods |
+| `Runtime/Handlers/GameHandler.cs` | High-level game tools: ui.*, input.action, game.* |
+| `Runtime/Tools/UIAnalysisTools.cs` | Canvas UI scanning (Text + TMP + interactive elements) |
+| `Runtime/Tools/InputActionTools.cs` | Virtual Gamepad + combined input (keys/mouse/axes) |
 | `Runtime/Handlers/SceneHandler.cs` | Scene inspection + manipulation tools |
 | `Runtime/Handlers/RecordingHandler.cs` | Gameplay recording tools (CyberAgent InstantReplay) |
 | `Runtime/Handlers/EditorHandler.cs` | Editor window control + eval + console + project tree + prefs |

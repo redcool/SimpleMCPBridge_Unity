@@ -103,6 +103,10 @@ namespace SimpleMCPBridge.Runtime
         public const string CLICK_SCREEN = "input.click_screen";
         /// <summary>在屏幕指定位置模拟鼠标点击（通过 Input System 低层级事件队列）。</summary>
         public const string MOUSE_CLICK = "input.mouse_click";
+        /// <summary>模拟鼠标移动增量（用于视角旋转/瞄准）。</summary>
+        public const string MOUSE_MOVE = "input.mouse_move";
+        /// <summary>模拟键盘按键（通过 Input System 低层级事件队列到物理键盘）。</summary>
+        public const string KEY_PRESS = "input.key_press";
 
         // ── 物理工具 ──
         /// <summary>从指定位置发射射线检测碰撞。</summary>
@@ -119,5 +123,23 @@ namespace SimpleMCPBridge.Runtime
         public const string STOP_RECORDING = "recording.stop";
         /// <summary>获取当前录制状态。</summary>
         public const string GET_RECORDING_STATUS = "recording.status";
+
+        // ── UI 分析工具 ──
+        /// <summary>获取场景中所有 UI 文本内容及屏幕坐标。</summary>
+        public const string UI_GET_TEXTS = "ui.get_texts";
+        /// <summary>查找场景中可交互的 UI 元素（Button/Toggle/Slider/Dropdown/InputField）。</summary>
+        public const string UI_FIND = "ui.find";
+
+        // ── 统一输入工具 ──
+        /// <summary>统一输入：键盘、鼠标、滚轮、轴（Input System + Legacy Input）。</summary>
+        public const string INPUT_ACTION = "input.action";
+
+        // ── 游戏状态与时序工具 ──
+        /// <summary>获取游戏综合状态（场景/时间/UI/玩家）。</summary>
+        public const string GAME_GET_STATE = "game.get_state";
+        /// <summary>开始一个等待操作（秒/场景加载/UI出现等）。</summary>
+        public const string GAME_WAIT = "game.wait";
+        /// <summary>轮询等待操作是否完成。</summary>
+        public const string GAME_WAIT_CHECK = "game.wait_check";
     }
 }

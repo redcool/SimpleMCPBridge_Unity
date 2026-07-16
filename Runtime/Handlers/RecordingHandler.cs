@@ -35,7 +35,6 @@ namespace SimpleMCPBridge.Runtime.Handlers
         private static string _lastExportPath;
         private static string _lastError;
 
-        private const string VIDEO_RECORD_DIR = "VideoRecord";
         private const int MAX_KEEP_FILES = 5;
 
         // ─── recording.start ──────────────────────────────────────────────
@@ -71,7 +70,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
                 width = Mathf.Clamp(width % 2 == 0 ? width : width + 1, 320, 3840);
                 height = Mathf.Clamp(height % 2 == 0 ? height : height + 1, 240, 2160);
 
-                int bitrate = QualityToBitrate(quality);
+                int bitrate = RecordingTools.QualityToBitrate(quality);
 
                 var options = new RealtimeEncodingOptions
                 {
@@ -95,7 +94,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
                     ForceReadback = false, // FreshFrameProvider gives unique textures per frame — no race
                 };
 
-                _outputPath = BuildOutputPath();
+                _outputPath = RecordingTools.BuildOutputPath();
                 Directory.CreateDirectory(Path.GetDirectoryName(_outputPath)!);
 
                 // Use FreshFrameProvider instead of ScreenshotFrameProvider to avoid
@@ -142,9 +141,9 @@ namespace SimpleMCPBridge.Runtime.Handlers
             if (_session == null)
             {
                 if (!string.IsNullOrEmpty(_lastExportPath))
-                    return BuildCompletedJson(_lastExportPath);
+                    return RecordingTools.BuildCompletedJson(_lastExportPath);
                 if (!string.IsNullOrEmpty(_lastError))
-                    return BuildErrorJson(_lastError);
+                    return RecordingTools.BuildErrorJson(_lastError);
                 return ErrorJson("No active recording.");
             }
 
@@ -209,13 +208,13 @@ namespace SimpleMCPBridge.Runtime.Handlers
                 {
                     var dir = Path.GetDirectoryName(_lastExportPath);
                     if (!string.IsNullOrEmpty(dir))
-                        CleanupOldRecordings(dir, MAX_KEEP_FILES);
+                        RecordingTools.CleanupOldRecordings(dir, MAX_KEEP_FILES);
 
                     DebugUtils.Log($"[Recording] Exported: {_lastExportPath}");
-                    return BuildCompletedJson(_lastExportPath);
+                    return RecordingTools.BuildCompletedJson(_lastExportPath);
                 }
 
-                return BuildErrorJson(_lastError ?? "Recording failed with unknown error.");
+                return RecordingTools.BuildErrorJson(_lastError ?? "Recording failed with unknown error.");
             }
 
             // Idle with previous export
@@ -345,69 +344,6 @@ namespace SimpleMCPBridge.Runtime.Handlers
             _session = null;
         }
 
-        public static string BuildOutputPath()
-        {
-            string dir;
-#if UNITY_EDITOR || UNITY_STANDALONE
-            dir = Path.Combine(Path.GetDirectoryName(Application.dataPath)!, VIDEO_RECORD_DIR);
-#else
-            dir = Path.Combine(Application.temporaryCachePath, VIDEO_RECORD_DIR);
-#endif
-            string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
-            return Path.Combine(dir, $"recording_{timestamp}.mp4");
-        }
-
-        public static string BuildCompletedJson(string filePath)
-        {
-            return JsonHelper.BuildJsonObject(
-                ("isRecording", "false"),
-                ("state", JsonHelper.EscapeString("completed")),
-                ("filePath", JsonHelper.EscapeString(filePath)),
-                ("message", JsonHelper.EscapeString("Recording exported successfully."))
-            );
-        }
-
-        public static string BuildErrorJson(string error)
-        {
-            return JsonHelper.BuildJsonObject(
-                ("isRecording", "false"),
-                ("state", JsonHelper.EscapeString("error")),
-                ("error", JsonHelper.EscapeString(error))
-            );
-        }
-
-        /// <summary>
-        /// Maps quality (1-100) to video bitrate in bps.
-        /// Lower quality → lower bitrate → smaller file but worse image.
-        /// </summary>
-        public static int QualityToBitrate(int quality)
-        {
-            quality = Mathf.Clamp(quality, 1, 100);
-            if (quality >= 90) return 12000000; // 12 Mbps — very high
-            if (quality >= 75) return 8000000;  //  8 Mbps — high
-            if (quality >= 50) return 4000000;  //  4 Mbps — medium (default)
-            if (quality >= 25) return 2000000;  //  2 Mbps — low
-            return 1000000;                      //  1 Mbps — very low
-        }
-
-        public static void CleanupOldRecordings(string directory, int keepCount)
-        {
-            try
-            {
-                if (!Directory.Exists(directory)) return;
-
-                var files = Directory.GetFiles(directory, "*.mp4");
-                if (files.Length <= keepCount) return;
-
-                Array.Sort(files);
-                for (int i = 0; i < files.Length - keepCount; i++)
-                {
-                    try { File.Delete(files[i]); }
-                    catch { /* best effort */ }
-                }
-            }
-            catch { /* best effort */ }
-        }
     }
 }
 

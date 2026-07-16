@@ -87,6 +87,11 @@ namespace SimpleMCPBridge.Runtime.Handlers
 
             if (s.StartsWith("["))
             {
+                // If the array contains objects or strings, return raw JSON string
+                // so callers can parse it with ParseJsonArrayOfObjects.
+                if (s.Contains('{') || s.Contains('"'))
+                    return s;
+
                 var inner = s.Trim('[', ']').Trim();
                 if (string.IsNullOrEmpty(inner)) return new float[0];
 
