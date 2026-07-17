@@ -20,10 +20,17 @@ Unity Editor / Runtime
 
 支持同时连接多个 Bridge（如 Editor + Android 设备），路由规则 **last-registration-wins**。
 
+## 前置要求
+
+- **Node.js 22+** — 运行 MCP Server
+- **Git** — 克隆仓库
+- **Unity 2022.3+**
+
 ## 安装
 
+### 1. Unity Bridge（放到 Unity 工程 Assets/ 目录）
+
 ```bash
-# 在 Unity 项目的 Assets/ 目录下克隆
 cd YourUnityProject/Assets/
 git clone https://github.com/redcool/SimpleMCPBridge_Unity.git SimpleMCPBridge
 ```
@@ -56,25 +63,53 @@ Assets/
 ├── ...
 ```
 
-> 注意：SimpleMCPBridge 是独立 git 仓库，不是 Unity 项目的子模块。
+> SimpleMCPBridge 是独立 git 仓库，不是 Unity 项目的子模块。
 > Plugins DLL 已包含在仓库内，clone 后无需手动下载。
+
+### 2. MCP Server（任意目录）
+
+```bash
+# 任意目录下克隆
+cd D:/dev/  # 举例，随意放哪里
+git clone https://github.com/redcool/SimpleMCPServer.git
+cd SimpleMCPServer
+# 首次需要安装依赖
+npm install
+npm run build
+```
+
+之后每次启动只需运行 `start.bat`（会自动 build + 启动）。
+
+### 3. InstantReplay（可选，录屏用）
+
+通过 Unity Package Manager 安装：
+
+```
+UPM Git URL:
+https://github.com/CyberAgentGameEntertainment/InstantReplay.git?path=Packages/jp.co.cyberagent.instant-replay#release
+```
+
+或者手动编辑 `Packages/manifest.json`：
+
+```json
+{
+  "dependencies": {
+    "jp.co.cyberagent.instant-replay": "https://github.com/CyberAgentGameEntertainment/InstantReplay.git?path=Packages/jp.co.cyberagent.instant-replay#release"
+  }
+}
+```
+
+安装后 `SimpleMCPBridge.asmdef` 的 `versionDefines` 会自动检测到该包，定义 `INSTANT_REPLAY_ON` 宏。
 
 ## 使用方法
 
-1. 用 Unity 打开项目
-2. 菜单栏 → **Tools → SimpleMCPBridge**
-3. 填写 Server IP/Port（默认 `127.0.0.1:45678`）
-4. 点击 **Connect to Server**
-5. 在另侧启动 `SimpleMcpServer`
+1. 启动 MCP Server（双击 `SimpleMcpServer/start.bat`）
+2. 用 Unity 打开项目
+3. 菜单栏 → **Tools → SimpleMCPBridge**
+4. 填写 Server IP/Port（默认 `127.0.0.1:45678`）
+5. 点击 **Connect to Server**
 
 Bridge 生命周期独立于窗口：关闭窗口后 bridge 继续运行，进出 Play Mode 自动重连。
-
-## 前置条件
-
-- **Unity 2022.3+**
-- **[SimpleMcpServer](https://github.com/redcool/SimpleMCPServer)** — 需先 clone 并启动
-- **[CyberAgent InstantReplay](https://github.com/CyberAgentGameEntertainment/InstantReplay)** — 通过 UPM 安装（`jp.co.cyberagent.instant-replay`），可选，用于录制 MP4
-- **Plugins 依赖 DLL** — 已包含在仓库内
 
 ## 配置
 
@@ -367,7 +402,7 @@ Get-Process -Name "node" | Stop-Process -Force
 
 ### 4. 多窗口 Unity 多 bridge
 
-多个 Unity 窗口打开时可能多个 bridge 同时连接，server 保留最近注册的 bridge。
+开启多个 Unity 进程（如多个 Editor 窗口）时各自建立独立 WebSocket 连接，每个进程一个 bridgeId。
 
 ## 相关仓库
 
