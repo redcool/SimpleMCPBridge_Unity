@@ -1,27 +1,15 @@
 using System;
-using System.IO;
 using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using UnityEngine;
 
 namespace SimpleMCPBridge.Runtime
 {
     /// <summary>
-    /// WebSocket client built on System.Net.WebSockets.ClientWebSocket (NuGet/framework built-in).
+    /// WebSocket client built on System.Net.WebSockets.ClientWebSocket.
     /// Drop-in alternative to WebSocketClient with identical event API.
-    /// 
-    /// Advantages over the custom WebSocketClient (raw TCP + manual RFC 6455):
-    ///   - Battle-tested by Microsoft, handles all edge cases (permessage-deflate, close handshake, etc.)
-    ///   - Proper close handshake on disconnect
-    ///   - Built-in fragmentation handling
-    ///   - Better for production/engineering use
-    /// 
-    /// Trade-offs:
-    ///   - Requires System.Net.WebSockets.ClientWebSocket (available via Unity NuGet or netstandard2.1)
-    ///   - Slightly more allocation overhead per receive
-    ///   - You can't control frame-level details
+    /// Payload encryption (if configured) is handled by BridgeClient, not at this layer.
     /// </summary>
     public class NetWebSocketClient : IWebSocketClient
     {
@@ -81,9 +69,11 @@ namespace SimpleMCPBridge.Runtime
                 CleanupAfterFailedConnect();
                 throw new TimeoutException($"Connect timeout after {ConnectTimeoutMs}ms to {host}:{port}");
             }
-            catch
+            catch (Exception ex)
             {
                 CleanupAfterFailedConnect();
+                var inner = ex.InnerException?.Message ?? ex.Message;
+                DebugUtils.LogWarning($"[NetWebSocketClient] Connect failed to {host}:{port}: {inner}");
                 throw;
             }
         }
@@ -122,6 +112,9 @@ namespace SimpleMCPBridge.Runtime
             // Non-blocking send-lock drain
             try { if (_sendLock.Wait(0)) _sendLock.Release(); } catch { }
 
+            _cts?.Dispose();
+            _cts = null;
+
             if (_ws != null)
             {
                 // Dispose sends TCP RST — instant non-blocking close.
@@ -135,7 +128,11 @@ namespace SimpleMCPBridge.Runtime
             _isConnected = false;
         }
 
-        public void Dispose() => Disconnect();
+        public void Dispose()
+        {
+            Disconnect();
+            _sendLock?.Dispose();
+        }
 
         // ── Receive loop ──
 

@@ -22,7 +22,11 @@ namespace SimpleMCPBridge
         {
             public string serverIp = "127.0.0.1";
             public int serverPort = 45678;
+            public string encryptionKey = "";
         }
+
+        /// <summary>Shared encryption key for AES-256-CBC payload encryption. Empty = no encryption.</summary>
+        public static string EncryptionKey { get; private set; } = "";
 
         /// <summary>
         /// 启动时调用：确保 Player 设备上有可写的配置文件副本。
@@ -32,8 +36,6 @@ namespace SimpleMCPBridge
         {
 #if !UNITY_EDITOR
             string path = GetPersistentPath();
-            if (File.Exists(path))
-                return;
 
             var textAsset = Resources.Load<TextAsset>(RESOURCE_NAME);
             if (textAsset == null)
@@ -43,8 +45,21 @@ namespace SimpleMCPBridge
             }
 
             Directory.CreateDirectory(Application.persistentDataPath);
-            File.WriteAllText(path, textAsset.text);
-            DebugUtils.Log($"[BridgeConfig] Copied default config to {path}");
+
+            // Overwrite if content changed (e.g. useTls was added in a new build)
+            if (File.Exists(path))
+            {
+                var existing = File.ReadAllText(path);
+                if (existing.Trim() == textAsset.text.Trim())
+                    return;
+                File.WriteAllText(path, textAsset.text);
+                DebugUtils.Log("[BridgeConfig] Updated config (content changed)");
+            }
+            else
+            {
+                File.WriteAllText(path, textAsset.text);
+                DebugUtils.Log($"[BridgeConfig] Copied default config to {path}");
+            }
 #endif
         }
 
@@ -90,6 +105,7 @@ namespace SimpleMCPBridge
                 if (config == null) return false;
                 ip = config.serverIp;
                 port = config.serverPort;
+                EncryptionKey = config.encryptionKey ?? "";
                 return true;
             }
             catch (System.Exception ex)

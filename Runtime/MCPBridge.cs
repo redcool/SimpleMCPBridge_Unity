@@ -66,7 +66,7 @@ namespace SimpleMCPBridge.Runtime
             var bridge = BridgeClient.Default;
             if (bridge == null) return;
             bridge.DrainQueue();
-            if (bridge.IsAutoReconnect && !bridge.IsConnected && EditorApplication.timeSinceStartup - s_lastAttempt > 0.5)
+            if (bridge.IsAutoReconnect && !bridge.IsConnected && EditorApplication.timeSinceStartup - s_lastAttempt > 3.0)
             {
                 s_lastAttempt = EditorApplication.timeSinceStartup;
                 // Call ConnectToServer via an MCPBridge instance that knows the IP
@@ -80,7 +80,7 @@ namespace SimpleMCPBridge.Runtime
         [SerializeField] private string _serverIp = "127.0.0.1";
         [SerializeField] private int _serverPort = 45678;
 
-        private const float ReconnectInterval = 0.5f;
+        private const float ReconnectInterval = 3f;
 
         private BridgeClient _bridge;
         private float _lastAttemptTime;

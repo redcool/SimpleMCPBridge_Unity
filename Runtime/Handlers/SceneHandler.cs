@@ -241,7 +241,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
                 return ErrorJson($"Component '{componentType}' not found on object '{go.name}'");
 
             // Try field first (most serialized Unity properties are fields)
-            var flags = BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.IgnoreCase;
+            var flags = BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase;
             var field = component.GetType().GetField(propertyName, flags);
             if (field != null)
             {
@@ -439,8 +439,19 @@ namespace SimpleMCPBridge.Runtime.Handlers
 
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
-                foreach (var type in assembly.GetTypes())
+                Type[] types;
+                try
                 {
+                    types = assembly.GetTypes();
+                }
+                catch (ReflectionTypeLoadException ex)
+                {
+                    types = ex.Types;
+                    if (types == null) continue;
+                }
+                foreach (var type in types)
+                {
+                    if (type == null) continue;
                     if (type.Name == componentType && type.IsSubclassOf(typeof(Component)) && !type.IsAbstract)
                     {
                         SceneObjectTools.UndoAddComponent(go, type);

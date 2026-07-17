@@ -6,7 +6,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using UnityEngine;
 
 namespace SimpleMCPBridge.Runtime
 {
@@ -48,7 +47,7 @@ namespace SimpleMCPBridge.Runtime
         private const int RecvBufferSize = 65536; // 64KB — fits any WebSocket frame below this size
 
         private TcpClient _tcpClient;
-        private NetworkStream _stream;
+        private Stream _stream;
         private CancellationTokenSource _cts;
         private volatile bool _isConnected;
         private volatile bool _disconnecting;
@@ -103,6 +102,7 @@ namespace SimpleMCPBridge.Runtime
 
                 ThrowIfDisposed();
                 _stream = _tcpClient.GetStream();
+
                 // ── Receive buffer ──
                 _recvBuffer = new byte[RecvBufferSize];
                 _recvStart = 0;
@@ -114,6 +114,7 @@ namespace SimpleMCPBridge.Runtime
                 ThrowIfDisposed();
 
                 _isConnected = true;
+                _disconnecting = false; // Fix 3: reset for reconnect
                 OnConnected?.Invoke();
 
                 // Start reading frames on background thread
@@ -160,6 +161,8 @@ namespace SimpleMCPBridge.Runtime
             // Wait briefly for in-flight send to finish (cooperative handover)
             try { _sendLock.Wait(DisconnectTimeoutMs); } catch { }
             try { _sendLock.Release(); } catch { }
+            _cts?.Dispose();
+            _cts = null;
             if (_tcpClient != null)
             {
                 try { _tcpClient.Close(); } catch { }
@@ -171,7 +174,11 @@ namespace SimpleMCPBridge.Runtime
             _isConnected = false;
         }
 
-        public void Dispose() => Disconnect();
+        public void Dispose()
+        {
+            Disconnect();
+            _sendLock?.Dispose();
+        }
 
         // ── Send ──
 
@@ -347,6 +354,10 @@ namespace SimpleMCPBridge.Runtime
                         for (int i = 0; i < Extended64Size; i++)
                             payloadLength = (payloadLength << 8) | ext[i];
                     }
+
+                    // ── Fix 1: Payload size validation ──
+                    if (payloadLength > 10 * 1024 * 1024)
+                        throw new InvalidOperationException($"WebSocket frame payload too large: {payloadLength} bytes");
 
                     // Mask key (server frames shouldn't be masked, but handle per spec)
                     byte[] maskKey = null;

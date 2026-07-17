@@ -31,8 +31,10 @@ namespace SimpleMCPBridge.Runtime
     {
         /// <summary>
         /// Called when an AI response arrives from the server.
+        /// Parameters: (requestId, text).
+        /// requestId lets callers match responses to their requests when multiple are in-flight.
         /// </summary>
-        public static event Action<string> OnResponseReceived;
+        public static event Action<string, string> OnResponseReceived;
 
         private static BridgeClient _bridge;
         private static readonly Dictionary<string, TaskCompletionSource<string>> _pending = new();
@@ -81,6 +83,7 @@ namespace SimpleMCPBridge.Runtime
         /// <param name="prompt">The user prompt / question for the AI.</param>
         /// <param name="context">Optional context data to send alongside the prompt.</param>
         /// <param name="system">Optional system prompt to guide the AI's behavior.</param>
+        /// <param name="messages">Optional conversation history (list of {"role","content"} dicts). Role: "user"|"assistant"|"system".</param>
         /// <param name="cancellationToken">Cancellation token (optional).</param>
         /// <returns>The AI's text response.</returns>
         /// <exception cref="InvalidOperationException">Bridge is not connected.</exception>
@@ -89,6 +92,7 @@ namespace SimpleMCPBridge.Runtime
             string prompt,
             Dictionary<string, object> context = null,
             string system = null,
+            System.Collections.IList messages = null,
             CancellationToken cancellationToken = default)
         {
             if (_bridge == null || !_bridge.IsConnected)
@@ -105,11 +109,16 @@ namespace SimpleMCPBridge.Runtime
 
                 // Build the JSON message
                 var contextObjJson = BuildContextJson(context);
+                var messagesJson = BuildMessagesJson(messages);
 
                 string message;
                 if (!string.IsNullOrEmpty(system))
                 {
-                    message = $"{{\"type\":\"ai_request\",\"requestId\":\"{requestId}\",\"prompt\":{JsonHelper.EscapeString(prompt)},\"context\":{contextObjJson},\"system\":{JsonHelper.EscapeString(system)}}}";
+                    message = $"{{\"type\":\"ai_request\",\"requestId\":\"{requestId}\",\"prompt\":{JsonHelper.EscapeString(prompt)},\"context\":{contextObjJson},\"system\":{JsonHelper.EscapeString(system)},\"messages\":{messagesJson}}}";
+                }
+                else if (messages != null && messages.Count > 0)
+                {
+                    message = $"{{\"type\":\"ai_request\",\"requestId\":\"{requestId}\",\"prompt\":{JsonHelper.EscapeString(prompt)},\"context\":{contextObjJson},\"messages\":{messagesJson}}}";
                 }
                 else
                 {
@@ -164,7 +173,7 @@ namespace SimpleMCPBridge.Runtime
             catch (Exception ex)
             {
                 DebugUtils.LogWarning($"[AIRequest] Ask failed: {ex.Message}");
-                OnResponseReceived?.Invoke(null);
+                OnResponseReceived?.Invoke(null, null);
             }
         }
 
@@ -172,11 +181,12 @@ namespace SimpleMCPBridge.Runtime
         {
             if (_pending.TryGetValue(requestId, out var tcs))
             {
+                _pending.Remove(requestId); // Fix 4: prevent leak for fire-and-forget calls
                 if (text != null)
                     tcs.TrySetResult(text);
                 else
                     tcs.TrySetResult(null); // null text means error already embedded
-                OnResponseReceived?.Invoke(text);
+                OnResponseReceived?.Invoke(requestId, text);
             }
         }
 
@@ -198,6 +208,16 @@ namespace SimpleMCPBridge.Runtime
             return $"{{{string.Join(",", parts)}}}";
         }
 
+        /// <summary>
+        /// Serialize a messages array to JSON.
+        /// Format: [{"role":"user","content":"..."}, {"role":"assistant","content":"..."}]
+        /// </summary>
+        private static string BuildMessagesJson(System.Collections.IList messages)
+        {
+            if (messages == null || messages.Count == 0) return "[]";
+            return ObjectToJson(messages);
+        }
+
         private static string ObjectToJson(object value)
         {
             if (value == null) return "null";
@@ -207,10 +227,10 @@ namespace SimpleMCPBridge.Runtime
             {
                 return Convert.ToDouble(value).ToString(System.Globalization.CultureInfo.InvariantCulture);
             }
-            if (value is Array arr)
+            if (value is System.Collections.IList list)
             {
                 var items = new List<string>();
-                foreach (var item in arr)
+                foreach (var item in list)
                     items.Add(ObjectToJson(item));
                 return $"[{string.Join(",", items)}]";
             }

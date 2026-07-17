@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Threading.Tasks;
+using SimpleMCPBridge;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -113,8 +114,15 @@ namespace SimpleMCPBridge.Runtime
 
             _client.OnMessageReceived += (message) =>
             {
-                Log($"MSG QUEUED: {message.Trim().Substring(0, Math.Min(message.Length, LogPreviewLength))}");
-                _mainThreadQueue.Enqueue(() => HandleMessage(message));
+                // Decrypt if encryption is enabled
+                var decrypted = SimpleMCPBridge.EncryptionHelper.Decrypt(message, SimpleMCPBridge.BridgeConfig.EncryptionKey);
+                if (decrypted == null)
+                {
+                    LogWarning("Failed to decrypt server message");
+                    return;
+                }
+                Log($"MSG QUEUED: {decrypted.Trim().Substring(0, Math.Min(decrypted.Length, LogPreviewLength))}");
+                _mainThreadQueue.Enqueue(() => HandleMessage(decrypted));
 #if UNITY_EDITOR
                 // Wake up Unity's main loop when a message is queued.
                 // Without this, when the Editor window is unfocused, EditorApplication.update
@@ -128,7 +136,8 @@ namespace SimpleMCPBridge.Runtime
             {
                 _mainThreadQueue.Enqueue(() =>
                 {
-                    Log($"Connected to server — ws://{Host}:{Port}");
+                    var encLabel = string.IsNullOrEmpty(SimpleMCPBridge.BridgeConfig.EncryptionKey) ? "" : " (encrypted)";
+                    Log($"Connected to server — ws://{Host}:{Port}{encLabel}");
                     OnConnectedSuccess?.Invoke();
                 });
 #if UNITY_EDITOR
@@ -162,7 +171,7 @@ namespace SimpleMCPBridge.Runtime
         public void Disconnect()
         {
             Log("Disconnect called");
-            _client?.Disconnect();
+            _client?.Dispose();
             _client = null;
             // _router is created once in constructor — do NOT null it
 
@@ -172,11 +181,15 @@ namespace SimpleMCPBridge.Runtime
         /// <summary>
         /// Send a raw message to the server asynchronously.
         /// Used by AIRequest to send ai_request messages.
+        /// Encrypts payload if encryption is configured.
         /// </summary>
         public async Task SendAsync(string message)
         {
             if (_client != null && _client.IsConnected)
-                await _client.SendAsync(message);
+            {
+                var encrypted = SimpleMCPBridge.EncryptionHelper.Encrypt(message, SimpleMCPBridge.BridgeConfig.EncryptionKey);
+                await _client.SendAsync(encrypted);
+            }
             else
                 throw new InvalidOperationException("Client not connected");
         }
@@ -239,13 +252,17 @@ namespace SimpleMCPBridge.Runtime
         /// <summary>
         /// Fire-and-forget send with error logging.
         /// Takes the client reference explicitly to avoid race with external client swap.
+        /// Encrypts payload if encryption is configured.
         /// </summary>
         private async Task SendSafeAsync(IWebSocketClient client, string message)
         {
             try
             {
                 if (client != null && client.IsConnected)
-                    await client.SendAsync(message);
+                {
+                    var encrypted = SimpleMCPBridge.EncryptionHelper.Encrypt(message, SimpleMCPBridge.BridgeConfig.EncryptionKey);
+                    await client.SendAsync(encrypted);
+                }
             }
             catch (Exception ex)
             {
@@ -255,7 +272,7 @@ namespace SimpleMCPBridge.Runtime
 
         private void HandleMessage(string rawMessage)
         {
-            Log("HANDLE MESSAGE");
+            Log("HANDLE MESSAGE "+ rawMessage);
 
             // ── Protocol: server requests tool list → we respond ──
             if (rawMessage.Contains("\"type\":\"request_tools\""))
