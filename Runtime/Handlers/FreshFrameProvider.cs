@@ -1,3 +1,4 @@
+#if INSTANT_REPLAY_ON
 using System;
 using System.Collections;
 using InstantReplay;
@@ -128,3 +129,4 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
     }
 }
+#endif

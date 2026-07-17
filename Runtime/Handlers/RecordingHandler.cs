@@ -1,4 +1,5 @@
-﻿using SimpleMCPBridge.Runtime;
+﻿#if INSTANT_REPLAY_ON
+using SimpleMCPBridge.Runtime;
 using SimpleMCPBridge.Runtime.Models;
 using System;
 using System.IO;
@@ -346,5 +347,5 @@ namespace SimpleMCPBridge.Runtime.Handlers
 
     }
 }
-
+#endif
 

@@ -1,4 +1,4 @@
-﻿{
+{
     "name": "SimpleMCPBridge",
     "rootNamespace": "",
     "references": [
@@ -19,6 +19,11 @@
             "name": "com.unity.inputsystem",
             "expression": "",
             "define": "UNITY_INPUT_SYSTEM"
+        },
+        {
+            "name": "jp.co.cyberagent.instant-replay",
+            "expression": "",
+            "define": "INSTANT_REPLAY_ON"
         }
     ],
     "noEngineReferences": false

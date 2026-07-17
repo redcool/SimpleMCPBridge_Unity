@@ -1,7 +1,8 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using UnityEngine;
 
 namespace SimpleMCPBridge
 {
@@ -93,29 +94,23 @@ namespace SimpleMCPBridge
         }
 
         /// <summary>
-        /// Minimal JSON parser — extracts the string value of "encrypted" key.
-        /// Returns null if the JSON doesn't start with {"encrypted":"...
-        /// This avoids parsing full JSON for every incoming message.
+        /// Extracts the string value of "encrypted" key from the JSON wrapper.
+        /// Uses JsonUtility for robust parsing — handles multi-field JSON correctly.
+        /// Returns null if the JSON doesn't contain an "encrypted" field.
         /// </summary>
+        [Serializable]
+        private class EncryptedWrapper
+        {
+            public string encrypted = "";
+        }
+
         private static string ExtractEncryptedValue(string json)
         {
             if (string.IsNullOrEmpty(json)) return null;
-            json = json.TrimStart();
-            if (!json.StartsWith("{\"encrypted\":")) return null;
+            if (!json.TrimStart().StartsWith("{\"encrypted\":")) return null;
 
-            // Find the opening quote of the value
-            var colonIdx = json.IndexOf(':', 14); // after {"encrypted":
-            if (colonIdx < 0) return null;
-
-            var quoteStart = colonIdx + 1;
-            while (quoteStart < json.Length && json[quoteStart] == ' ') quoteStart++;
-            if (quoteStart >= json.Length || json[quoteStart] != '"') return null;
-
-            quoteStart++; // skip opening quote
-            var quoteEnd = json.LastIndexOf('"');
-            if (quoteEnd <= quoteStart) return null;
-
-            return json.Substring(quoteStart, quoteEnd - quoteStart);
+            var wrapper = JsonUtility.FromJson<EncryptedWrapper>(json);
+            return wrapper?.encrypted;
         }
     }
 }

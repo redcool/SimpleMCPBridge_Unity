@@ -118,7 +118,12 @@ namespace SimpleMCPBridge.Runtime
                 var decrypted = SimpleMCPBridge.EncryptionHelper.Decrypt(message, SimpleMCPBridge.BridgeConfig.EncryptionKey);
                 if (decrypted == null)
                 {
-                    LogWarning("Failed to decrypt server message");
+                    LogWarning("Failed to decrypt server message — key mismatch?");
+                    // Send error as plaintext (peer clearly can't decrypt encrypted frames)
+                    var errMsg = "{\"type\":\"error\",\"code\":\"decrypt_failed\",\"message\":\"Payload decryption failed — check encryptionKey\"}";
+                    var sendClient = _client;
+                    if (sendClient != null && sendClient.IsConnected)
+                        _ = SendSafeAsync(sendClient, errMsg);
                     return;
                 }
                 Log($"MSG QUEUED: {decrypted.Trim().Substring(0, Math.Min(decrypted.Length, LogPreviewLength))}");
