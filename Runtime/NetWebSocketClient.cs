@@ -110,7 +110,7 @@ namespace SimpleMCPBridge.Runtime
             _cts?.Cancel();
 
             // Non-blocking send-lock drain
-            try { if (_sendLock.Wait(0)) _sendLock.Release(); } catch { }
+            try { if (_sendLock.Wait(0)) _sendLock.Release(); } catch (Exception ex) { UnityEngine.Debug.LogWarning($"[NetWebSocket] send-lock release on disconnect failed: {ex.Message}"); }
 
             _cts?.Dispose();
             _cts = null;

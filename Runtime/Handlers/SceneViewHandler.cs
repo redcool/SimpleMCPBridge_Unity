@@ -1,7 +1,8 @@
-#if UNITY_EDITOR
+﻿#if UNITY_EDITOR
 using SimpleMCPBridge.Runtime;
 using SimpleMCPBridge.Runtime.Models;
 using System;
+using System.Globalization;
 using UnityEditor;
 using UnityEngine;
 using static SimpleMCPBridge.Runtime.Handlers.HandlerUtils;
@@ -33,14 +34,15 @@ namespace SimpleMCPBridge.Runtime.Handlers
             var rot = cam.transform.rotation.eulerAngles;
             var isOrtho = sv.orthographic;
 
+            var inv = CultureInfo.InvariantCulture;
             return JsonHelper.BuildJsonObject(
-                ("position", $"[{pos.x},{pos.y},{pos.z}]"),
-                ("rotation", $"[{rot.x},{rot.y},{rot.z}]"),
-                ("pivot", $"[{sv.pivot.x},{sv.pivot.y},{sv.pivot.z}]"),
+                ("position", $"[{pos.x.ToString(inv)},{pos.y.ToString(inv)},{pos.z.ToString(inv)}]"),
+                ("rotation", $"[{rot.x.ToString(inv)},{rot.y.ToString(inv)},{rot.z.ToString(inv)}]"),
+                ("pivot", $"[{sv.pivot.x.ToString(inv)},{sv.pivot.y.ToString(inv)},{sv.pivot.z.ToString(inv)}]"),
                 ("isOrthographic", isOrtho ? "true" : "false"),
-                ("size", isOrtho ? sv.size.ToString() : sv.camera.fieldOfView.ToString()),
-                ("farClip", cam.farClipPlane.ToString()),
-                ("nearClip", cam.nearClipPlane.ToString())
+                ("size", isOrtho ? sv.size.ToString(inv) : sv.camera.fieldOfView.ToString(inv)),
+                ("farClip", cam.farClipPlane.ToString(inv)),
+                ("nearClip", cam.nearClipPlane.ToString(inv))
             );
         }
 

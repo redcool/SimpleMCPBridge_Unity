@@ -54,7 +54,7 @@ server keeps only the most recent one.
 - **Server stderr:** `SimpleMcpServer/server.err`
 - **Unity Editor log:** `$env:LOCALAPPDATA\Unity\Editor\Editor.log`
 
-## Tools (53)
+## Tools (80)
 
 | Tool | What it does | Platform |
 |------|-------------|----------|
@@ -83,7 +83,16 @@ server keeps only the most recent one.
 | `scene.pause_play_mode` | Pause/resume Play Mode | Editor |
 | `scene.get_play_mode` | Get current play mode state | Editor |
 | `physics.raycast` | Cast a ray and return first hit info | All |
-| `camera.screenshot` | Capture main camera view and save as PNG | Editor |
+| `physics.box_cast` | Sweep a box along direction, return first hit | All |
+| `physics.sphere_cast` | Sweep a sphere along direction, return first hit | All |
+| `physics.overlap_sphere` | All colliders within a sphere (name, instanceId, path, position, tag, layer) | All |
+| `physics.overlap_box` | All colliders within a box (optional rotation) | All |
+| `camera.screenshot` | Capture main camera view and save as PNG (root: Editor→Project/VideoRecord, Runtime→tempCache/VideoRecord) | All |
+| `audio.get_sources` | List all playing AudioSources (clipName, volume, isPlaying, time, loop, spatialBlend, position, distanceFromListener, path, instanceId) | All |
+| `nav.query_path` | Find path between two points on NavMesh (reachable, status, waypoints, distance) | All |
+| `nav.sample_position` | Snap world position to nearest NavMesh point | All |
+| `nav.has_navmesh` | Check if NavMesh exists (hasNavMesh, vertexCount, triangleCount) | All |
+| `nav.move_to` | Set NavMeshAgent destination, auto pathfinding movement | All |
 | `asset.refresh` | Refresh Unity asset database | All |
 | `asset.find_assets` | Search Assets/ by name and/or type (AssetDatabase.FindAssets) | Editor |
 | `asset.find_references` | Find all assets referencing a given asset | All |
@@ -98,19 +107,37 @@ server keeps only the most recent one.
 | `editor.redo` | Redo last undone operation | Editor |
 | `editor.get_preferences` | Read Editor/Project settings | Editor |
 | `editor.get_project_tree` | Get Assets directory tree (folders + files + sizes) | Editor |
-| `input.click_screen` | Simulate click at normalized screen position (EventSystem) | All |
+| `input.click_screen` | Simulate click at normalized screen position (EventSystem, **no Input System needed**) | All |
 | `input.mouse_click` | Simulate mouse click at normalized screen position (Input System) | All |
 | `input.mouse_move` | Move mouse by pixel delta (camera look/aim) (Input System) | All |
 | `input.key_press` | Simulate keyboard key — tap/hold/release (Input System) | All |
 | `input.touch` | Touch simulation: tap, start, move, end (virtual Touchscreen, Input System) | All |
 | `input.swipe` | Async smooth swipe/drag gesture from one point to another over time | All |
 | `input.gamepad` | Gamepad control: button tap/press/release, axis, batch set, reset, state query | All |
+| `input.get_state` | Query all current input states (tracked keys/mouse position/gamepad) | All |
 | `input.action` | Unified input: keys + mouse + axes + scroll in one call | All |
 | `ui.get_texts` | Read on-screen UI text from memory (no OCR) — Text + TMP | All |
 | `ui.find` | Find interactive UI elements with screen positions + state | All |
-| `game.get_state` | Composite scene/time/UI/player perception snapshot | All |
+| `ui.set_input_field_text` | Set InputField/TMP_InputField text directly | All |
+| `ui.set_toggle` | Set Toggle on/off | All |
+| `ui.set_slider` | Set Slider value (normalized 0-1 maps to minValue-maxValue) | All |
+| `ui.select_dropdown_option` | Select Dropdown option by index or text | All |
+| `ui.drag` | Simulate drag from one UI element to another via ExecuteEvents | All |
+| `ui.get_tooltip` | Fire PointerEnter on target, scan visible text for tooltip | All |
+| `game.get_state` | Composite scene/time/UI/player/camera perception snapshot (includes camera position, forward, fov, isOrthographic, nearClipPlane, farClipPlane) | All |
+| `game.get_animator_state` | Get Animator current state (stateHash/normalizedTime/parameters) | All |
+| `game.get_entities` | Batch get entities with AI/Health/CharacterController and their key states | All |
+| `game.get_player` | One-step get player full state (position/rotation/velocity/animation/custom component properties) | All |
+| `game.get_time_scale` | Get current Time.timeScale and fixedDeltaTime | All |
+| `game.get_spatial` | Nearby 3D objects within radius from origin/player (name, pos, distance, direction, components) | All |
+| `game.watch` | Register property signals for change monitoring (baseline at registration) | All |
+| `game.get_delta` | Poll watched signals — returns only changed values since last call | All |
+| `game.do_sequence` | Execute predefined action sequence (key/mouse/gamepad/click/wait) on Unity side | All |
+| `game.sequence_status` | Poll sequence execution status | All |
+| `game.set_time_scale` | Set Time.timeScale (0=pause, 1=normal, 2=2x speed) | All |
 | `game.wait` | Async wait: seconds, scene load, UI appear/disappear, component property | All |
 | `game.wait_check` | Poll game.wait completion status | All |
+| `game.batch` | Execute multiple tool calls in one Unity frame (max 50, reduces N+1 round trips to 1) | All |
 | `recording.start` | Start recording via InstantReplay (Android only, Play Mode) | Android |
 | `recording.stop` | Stop recording and finalize MP4 (async, poll status) | Android |
 | `recording.status` | Get current recording/export state | Android |
@@ -209,8 +236,11 @@ compilation error — check `editor.get_console` for details.
 | `Runtime/Handlers/RecordingHandler.cs` | Gameplay recording tools (CyberAgent InstantReplay) |
 | `Runtime/Handlers/EditorHandler.cs` | Editor window control + eval + console + project tree + prefs |
 | `Runtime/Handlers/SceneViewHandler.cs` | SceneView camera control |
-| `Runtime/Handlers/PhysicsHandler.cs` | Physics raycast |
+| `Runtime/Handlers/PhysicsHandler.cs` | Physics raycast + box/sphere cast + overlap queries |
 | `Runtime/Handlers/CameraHandler.cs` | Main camera screenshot |
+| `Runtime/Handlers/AudioHandler.cs` | Audio source inspection |
+| `Runtime/Handlers/NavHandler.cs` | NavMesh pathfinding + sampling |
+| `Runtime/Handlers/BatchHandler.cs` | Batch dispatch (game.batch) |
 | `Runtime/MCPToolAttribute.cs` | MCPTool + MCPToolClass attrs + MCPToolPlatforms enum |
 | `Runtime/MCPToolRegistry.cs` | Auto-discovery + registration + platform filter |
 | `Editor/MCPBridgeWindow.cs` | Tools > SimpleMCPBridge window |
@@ -265,7 +295,7 @@ compilation error — check `editor.get_console` for details.
 服务器支持多个 bridge 同时连接（如 Editor + Android）。
 
 - 路由规则: **last-registration-wins** — 后连接的 bridge 覆盖同名工具的前一个注册
-- Editor bridge (53 tools) 先连接 → Android bridge (35 tools) 后连接 → Android 覆盖重叠工具
+- Editor bridge (80 tools) 先连接 → Android bridge (35 tools) 后连接 → Android 覆盖重叠工具
 - 两个 bridge 都有 `scene.set_transform` → 调用路由到 **Android**（后注册者）
 - 录屏工具 (`recording.*`) 只在 Android bridge 注册（`Platform = Android | iOS | Standalone`）
 - 验证路由目标: `scene.get_hierarchy` 返回 flat array `[...]` = Android; 返回 `{"value":[...],"Count":N}` = Editor

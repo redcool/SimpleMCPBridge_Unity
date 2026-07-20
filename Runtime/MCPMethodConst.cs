@@ -117,6 +117,14 @@ namespace SimpleMCPBridge.Runtime
         // ── 物理工具 ──
         /// <summary>从指定位置发射射线检测碰撞。</summary>
         public const string PHYSICS_RAYCAST = "physics.raycast";
+        /// <summary>沿方向横扫一个盒体并返回首次碰撞。</summary>
+        public const string PHYSICS_BOX_CAST = "physics.box_cast";
+        /// <summary>沿方向横扫一个球体并返回首次碰撞。</summary>
+        public const string PHYSICS_SPHERE_CAST = "physics.sphere_cast";
+        /// <summary>获取指定球体范围内所有碰撞体。</summary>
+        public const string PHYSICS_OVERLAP_SPHERE = "physics.overlap_sphere";
+        /// <summary>获取指定盒体范围内所有碰撞体。</summary>
+        public const string PHYSICS_OVERLAP_BOX = "physics.overlap_box";
 
         // ── 相机工具 ──
         /// <summary>截取主相机画面并保存为 PNG。</summary>
@@ -147,5 +155,67 @@ namespace SimpleMCPBridge.Runtime
         public const string GAME_WAIT = "game.wait";
         /// <summary>轮询等待操作是否完成。</summary>
         public const string GAME_WAIT_CHECK = "game.wait_check";
+
+        // ── 连续感知工具 ──
+        /// <summary>注册要持续监测的信号（属性/UI文本/Transform变化）。</summary>
+        public const string GAME_WATCH = "game.watch";
+        /// <summary>获取自上次查询以来所有信号的变化（增量）。</summary>
+        public const string GAME_GET_DELTA = "game.get_delta";
+
+        // ── 动作序列工具 ──
+        /// <summary>执行一系列预设步骤（键盘/鼠标/手柄/点击/等待的组合序列）。</summary>
+        public const string GAME_DO_SEQUENCE = "game.do_sequence";
+        /// <summary>查询序列执行状态。</summary>
+        public const string GAME_SEQUENCE_STATUS = "game.sequence_status";
+
+        // ── 空间感知工具 ──
+        /// <summary>获取参考点周围指定半径内的 GameObject 空间信息。</summary>
+        public const string GAME_GET_SPATIAL = "game.get_spatial";
+
+        // ── 批量分发工具 ──
+        /// <summary>在一帧内执行多个工具调用，将 N+1 次网络往返压缩为 1 次。</summary>
+        public const string GAME_BATCH = "game.batch";
+
+        // ── 导航网格工具 ──
+        /// <summary>在 NavMesh 上计算两点之间的路径。</summary>
+        public const string NAV_QUERY_PATH = "nav.query_path";
+        /// <summary>将世界坐标吸附到最近的 NavMesh 位置。</summary>
+        public const string NAV_SAMPLE_POSITION = "nav.sample_position";
+        /// <summary>检查场景中是否存在 NavMesh。</summary>
+        public const string NAV_HAS_NAVMESH = "nav.has_navmesh";
+
+        // ── 音频工具 ──
+        /// <summary>获取场景中所有正在播放的 AudioSource。</summary>
+        public const string AUDIO_GET_SOURCES = "audio.get_sources";
+
+        // ── UI 操作工具 ──
+        /// <summary>设置输入框文本。</summary>
+        public const string UI_SET_INPUT_FIELD_TEXT = "ui.set_input_field_text";
+        /// <summary>设置 Toggle 开关状态。</summary>
+        public const string UI_SET_TOGGLE = "ui.set_toggle";
+        /// <summary>设置 Slider 滑块值。</summary>
+        public const string UI_SET_SLIDER = "ui.set_slider";
+        /// <summary>选择 Dropdown 下拉选项。</summary>
+        public const string UI_SELECT_DROPDOWN_OPTION = "ui.select_dropdown_option";
+        /// <summary>拖拽 UI 元素从起点到终点。</summary>
+        public const string UI_DRAG = "ui.drag";
+        /// <summary>获取 UI 元素的 Tooltip 文本。</summary>
+        public const string UI_GET_TOOLTIP = "ui.get_tooltip";
+
+        // ── 玩家与实体感知工具 ──
+        /// <summary>一步获取玩家完整状态（位置/旋转/速度/动画/自定义组件属性）。</summary>
+        public const string GAME_GET_PLAYER = "game.get_player";
+        /// <summary>批量获取场景中带AI/Health/CharacterController的实体及其关键状态。</summary>
+        public const string GAME_GET_ENTITIES = "game.get_entities";
+        /// <summary>获取 Animator 当前状态（stateHash/normalizedTime/parameters）。</summary>
+        public const string GAME_GET_ANIMATOR_STATE = "game.get_animator_state";
+        /// <summary>查询当前所有输入状态（tracked keys/mouse position/gamepad）。</summary>
+        public const string INPUT_GET_STATE = "input.get_state";
+        /// <summary>设置 NavMeshAgent 目标点，自动寻路移动。</summary>
+        public const string NAV_MOVE_TO = "nav.move_to";
+        /// <summary>获取当前 Time.timeScale 和 fixedDeltaTime。</summary>
+        public const string GAME_GET_TIME_SCALE = "game.get_time_scale";
+        /// <summary>设置 Time.timeScale（0=暂停, 1=正常, 2=2倍速）。</summary>
+        public const string GAME_SET_TIME_SCALE = "game.set_time_scale";
     }
 }

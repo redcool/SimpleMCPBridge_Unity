@@ -1,26 +1,30 @@
-﻿#if UNITY_EDITOR
-using System;
+﻿using System;
 using System.Globalization;
 using System.IO;
-using UnityEditor;
 using UnityEngine;
 using static SimpleMCPBridge.Runtime.Handlers.HandlerUtils;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace SimpleMCPBridge.Runtime.Handlers
 {
     /// <summary>
-    /// Handles camera-related MCP operations (screenshot, camera queries).
-    /// Editor only — uses ScreenCapture API + AssetDatabase for save path resolution.
+    /// Handles camera-related MCP operations (screenshot).
+    /// Relative savePath roots: Editor → ProjectRoot/VideoRecord, Runtime → Application.temporaryCachePath/VideoRecord.
     /// </summary>
     [MCPToolClass]
     public class CameraHandler
     {
-        [MCPTool(MCPMethodConst.CAMERA_SCREENSHOT, "Capture the main camera view and save as PNG. " +
-            "Params: savePath (string, required — where to save, relative to project root or absolute), " +
+        [MCPTool(MCPMethodConst.CAMERA_SCREENSHOT,
+            "Capture a camera view and save as PNG. " +
+            "Params: savePath (string, required — relative path under VideoRecord/, or absolute path), " +
             "cameraName (string, optional, default 'Main Camera'), " +
             "width (int, optional, default screen width), " +
             "height (int, optional, default screen height). " +
-            "Returns the absolute file path of the saved screenshot.")]
+            "Relative paths are rooted at: Editor → <Project>/VideoRecord/, Runtime → <temporaryCachePath>/VideoRecord/. " +
+            "Returns the absolute file path of the saved screenshot.",
+            Platform = MCPToolPlatforms.All)]
         public static string Screenshot(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
@@ -28,6 +32,9 @@ namespace SimpleMCPBridge.Runtime.Handlers
             var cameraName = GetString(args, "cameraName", "Main Camera");
             var width = (int)GetOptionalInt(args, "width").GetValueOrDefault(Screen.width);
             var height = (int)GetOptionalInt(args, "height").GetValueOrDefault(Screen.height);
+            const int maxScreenshotSize = 4096;
+            width = Mathf.Clamp(width, 1, maxScreenshotSize);
+            height = Mathf.Clamp(height, 1, maxScreenshotSize);
 
             // Find camera by name
             var cameras = UnityEngine.Object.FindObjectsByType<Camera>(FindObjectsSortMode.None);
@@ -44,26 +51,34 @@ namespace SimpleMCPBridge.Runtime.Handlers
             if (targetCam == null)
                 return ErrorJson($"Camera '{cameraName}' not found in scene");
 
-            // Resolve save path: if relative, resolve from project root
-            string fullPath;
+            // Resolve save path with platform-specific VideoRecord root
+            // Reject absolute paths to prevent path traversal
             if (Path.IsPathRooted(savePath))
-            {
-                fullPath = savePath;
-            }
-            else
-            {
-                // Relative to project root (where Assets/ lives)
-                var projectRoot = Path.GetDirectoryName(Application.dataPath);
-                fullPath = Path.Combine(projectRoot, savePath);
-            }
+                return ErrorJson("Absolute paths not allowed; use a relative path under VideoRecord/");
+
+            string rootDir;
+#if UNITY_EDITOR
+            rootDir = Path.Combine(Path.GetDirectoryName(Application.dataPath), "VideoRecord");
+#else
+            rootDir = Path.Combine(Application.temporaryCachePath, "VideoRecord");
+#endif
+
+            // Normalize and validate path stays within rootDir (prevents ../../ traversal)
+            var fullRoot = Path.GetFullPath(rootDir);
+            string fullPath = Path.GetFullPath(Path.Combine(fullRoot, savePath));
+            if (!fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase))
+                return ErrorJson("Path traversal not allowed; savePath must stay under VideoRecord/");
 
             // Ensure directory exists
             var dir = Path.GetDirectoryName(fullPath);
             if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
                 Directory.CreateDirectory(dir);
 
-            // Render camera to RenderTexture
-            var rt = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32);
+            // Render camera to RenderTexture (HDR if camera allows it)
+            var rtFormat = targetCam.allowHDR
+                ? RenderTextureFormat.DefaultHDR
+                : RenderTextureFormat.ARGB32;
+            var rt = new RenderTexture(width, height, 24, rtFormat);
             var oldRt = targetCam.targetTexture;
             targetCam.targetTexture = rt;
             targetCam.Render();
@@ -78,7 +93,6 @@ namespace SimpleMCPBridge.Runtime.Handlers
             RenderTexture.active = activeRt;
 
             // Cleanup RT
-            targetCam.targetTexture = oldRt;
             RenderTexture.DestroyImmediate(rt);
 
             // Encode to PNG and save
@@ -86,7 +100,9 @@ namespace SimpleMCPBridge.Runtime.Handlers
             File.WriteAllBytes(fullPath, bytes);
             RenderTexture.DestroyImmediate(tex);
 
+#if UNITY_EDITOR
             AssetDatabase.Refresh();
+#endif
 
             return JsonHelper.BuildJsonObject(
                 ("success", "true"),
@@ -97,5 +113,4 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
     }
 }
-#endif
 

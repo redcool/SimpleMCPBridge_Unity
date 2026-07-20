@@ -17,10 +17,10 @@ namespace SimpleMCPBridge.Runtime
     /// On connect, automatically registers all [MCPTool]-annotated methods
     /// with the server via a `register_tools` message.
     ///
-    /// Queue draining must be called externally (e.g. from AutoStartBridge.Update() or
+    /// Queue draining must be called externally (e.g. from MCPBridge.Update() or
     /// an EditorApplication.update handler) via DrainQueue().
     ///
-    /// Lifecycle is managed by AutoStartBridge.
+    /// Lifecycle is managed by MCPBridge.
     /// </summary>
     public class BridgeClient
     {
@@ -33,6 +33,7 @@ namespace SimpleMCPBridge.Runtime
         private MessageRouter _router;
         private readonly ConcurrentQueue<Action> _mainThreadQueue = new();
         private int _tickCount;
+        private bool _serverEncryptionEnabled = false;
 
         // ── Public properties ──
         public string Host { get; private set; } = "127.0.0.1";
@@ -43,9 +44,16 @@ namespace SimpleMCPBridge.Runtime
 
         /// <summary>
         /// Shared default bridge instance.
-        /// Set by AutoStartBridge (or the first owner that creates a bridge).
+        /// Set by MCPBridge (or the first owner that creates a bridge).
+        /// Thread-safe via lock (Fix P2#5).
         /// </summary>
-        public static BridgeClient Default { get; set; }
+        private static readonly object _defaultLock = new();
+        private static BridgeClient _default;
+        public static BridgeClient Default
+        {
+            get { lock (_defaultLock) { return _default; } }
+            set { lock (_defaultLock) { _default = value; } }
+        }
 
         /// <summary>
         /// Whether the bridge should automatically reconnect when disconnected.
@@ -81,6 +89,8 @@ namespace SimpleMCPBridge.Runtime
         public event Action OnConnectedSuccess;
         /// <summary>Invoked when an AI response arrives from the server (type: ai_response).</summary>
         public event Action<string, string> OnAIResponse; // (requestId, text)
+        /// <summary>Invoked when the bridge disconnects from the server.</summary>
+        public event Action OnDisconnected;
 
         // ── Constructor ──
 
@@ -107,65 +117,20 @@ namespace SimpleMCPBridge.Runtime
             // Force-clean any previous client (even stuck-connecting ones)
             if (_client != null)
             {
-                try { _client.Disconnect(); } catch { }
+                try { _client.Disconnect(); } catch (Exception ex) { Log($"Disconnect cleanup error: {ex.Message}"); }
+                // Unsubscribe from old client's events before discarding (Fix C3)
+                _client.OnMessageReceived -= OnServerMessage;
+                _client.OnConnected -= OnServerConnected;
+                _client.OnDisconnected -= OnServerDisconnected;
+                _client.OnError -= OnServerError;
                 _client = null;
             }
             _client = new NetWebSocketClient();
 
-            _client.OnMessageReceived += (message) =>
-            {
-                // Decrypt if encryption is enabled
-                var decrypted = SimpleMCPBridge.EncryptionHelper.Decrypt(message, SimpleMCPBridge.BridgeConfig.EncryptionKey);
-                if (decrypted == null)
-                {
-                    LogWarning("Failed to decrypt server message — key mismatch?");
-                    // Send error as plaintext (peer clearly can't decrypt encrypted frames)
-                    var errMsg = "{\"type\":\"error\",\"code\":\"decrypt_failed\",\"message\":\"Payload decryption failed — check encryptionKey\"}";
-                    var sendClient = _client;
-                    if (sendClient != null && sendClient.IsConnected)
-                        _ = SendSafeAsync(sendClient, errMsg);
-                    return;
-                }
-                Log($"MSG QUEUED: {decrypted.Trim().Substring(0, Math.Min(decrypted.Length, LogPreviewLength))}");
-                _mainThreadQueue.Enqueue(() => HandleMessage(decrypted));
-#if UNITY_EDITOR
-                // Wake up Unity's main loop when a message is queued.
-                // Without this, when the Editor window is unfocused, EditorApplication.update
-                // may not fire frequently enough (or at all), causing the queue to never drain
-                // and tool calls to time out.
-                UnityEditor.EditorApplication.QueuePlayerLoopUpdate();
-#endif
-            };
-
-            _client.OnConnected += () =>
-            {
-                _mainThreadQueue.Enqueue(() =>
-                {
-                    var encLabel = string.IsNullOrEmpty(SimpleMCPBridge.BridgeConfig.EncryptionKey) ? "" : " (encrypted)";
-                    Log($"Connected to server — ws://{Host}:{Port}{encLabel}");
-                    OnConnectedSuccess?.Invoke();
-                });
-#if UNITY_EDITOR
-                UnityEditor.EditorApplication.QueuePlayerLoopUpdate();
-#endif
-            };
-
-            _client.OnDisconnected += () =>
-            {
-                _mainThreadQueue.Enqueue(() =>
-                {
-                    Log("Disconnected from server");
-                    LogWarning("Disconnected from SimpleMcpServer");
-                });
-            };
-
-            _client.OnError += (err) =>
-            {
-                _mainThreadQueue.Enqueue(() =>
-                {
-                    Log($"Client error: {err}");
-                });
-            };
+            _client.OnMessageReceived += OnServerMessage;
+            _client.OnConnected += OnServerConnected;
+            _client.OnDisconnected += OnServerDisconnected;
+            _client.OnError += OnServerError;
 
             _ = ConnectAsync(host, port);
         }
@@ -192,8 +157,12 @@ namespace SimpleMCPBridge.Runtime
         {
             if (_client != null && _client.IsConnected)
             {
-                var encrypted = SimpleMCPBridge.EncryptionHelper.Encrypt(message, SimpleMCPBridge.BridgeConfig.EncryptionKey);
-                await _client.SendAsync(encrypted);
+                if (_serverEncryptionEnabled && string.IsNullOrEmpty(SimpleMCPBridge.BridgeConfig.EncryptionKey))
+                    LogWarning("Server requires encryption but no key configured in bridge-config.json");
+                var msgToSend = _serverEncryptionEnabled
+                    ? SimpleMCPBridge.EncryptionHelper.Encrypt(message, SimpleMCPBridge.BridgeConfig.EncryptionKey)
+                    : message;
+                await _client.SendAsync(msgToSend);
             }
             else
                 throw new InvalidOperationException("Client not connected");
@@ -265,8 +234,12 @@ namespace SimpleMCPBridge.Runtime
             {
                 if (client != null && client.IsConnected)
                 {
-                    var encrypted = SimpleMCPBridge.EncryptionHelper.Encrypt(message, SimpleMCPBridge.BridgeConfig.EncryptionKey);
-                    await client.SendAsync(encrypted);
+                    if (_serverEncryptionEnabled && string.IsNullOrEmpty(SimpleMCPBridge.BridgeConfig.EncryptionKey))
+                        LogWarning("Server requires encryption but no key configured in bridge-config.json");
+                    var msgToSend = _serverEncryptionEnabled
+                        ? SimpleMCPBridge.EncryptionHelper.Encrypt(message, SimpleMCPBridge.BridgeConfig.EncryptionKey)
+                        : message;
+                    await client.SendAsync(msgToSend);
                 }
             }
             catch (Exception ex)
@@ -279,8 +252,21 @@ namespace SimpleMCPBridge.Runtime
         {
             Log("HANDLE MESSAGE "+ rawMessage);
 
+            // ── Extract message type once for routing (Fix I1) ──
+            var msgType = ExtractJsonString(rawMessage, "type");
+
+            // ── Server info notification (encryption flag, etc.) ──
+            if (msgType == "server_info")
+            {
+                var encStr = ExtractJsonString(rawMessage, "encryption");
+                _serverEncryptionEnabled = encStr == "true";
+                Log($"Server info: encryption={_serverEncryptionEnabled}");
+                // Don't send a response — this is a notification
+                return;
+            }
+
             // ── Protocol: server requests tool list → we respond ──
-            if (rawMessage.Contains("\"type\":\"request_tools\""))
+            if (msgType == "request_tools")
             {
                 Log("  Server requested tool list — sending register_tools");
                 if (_router == null)
@@ -304,7 +290,7 @@ namespace SimpleMCPBridge.Runtime
             }
 
             // ── AI response from server ──
-            if (rawMessage.Contains("\"type\":\"ai_response\""))
+            if (msgType == "ai_response")
             {
                 Log("  AI response received");
                 try
@@ -344,6 +330,77 @@ namespace SimpleMCPBridge.Runtime
             }
         }
 
+        // ── Named event handlers (Fix C3: enables proper unsubscribe on reconnect) ──
+
+        private void OnServerMessage(string message)
+        {
+            // Decrypt only when server says encryption is enabled
+            string processed;
+            if (_serverEncryptionEnabled)
+            {
+                if (string.IsNullOrEmpty(SimpleMCPBridge.BridgeConfig.EncryptionKey))
+                {
+                    LogWarning("Server requires encryption but no key configured in bridge-config.json");
+                    return;
+                }
+                processed = SimpleMCPBridge.EncryptionHelper.Decrypt(message, SimpleMCPBridge.BridgeConfig.EncryptionKey);
+                if (processed == null)
+                {
+                    LogWarning("Failed to decrypt server message — key mismatch?");
+                    // Send error as plaintext (peer clearly can't decrypt encrypted frames)
+                    var errMsg = "{\"type\":\"error\",\"code\":\"decrypt_failed\",\"message\":\"Payload decryption failed — check encryptionKey\"}";
+                    var sendClient = _client;
+                    if (sendClient != null && sendClient.IsConnected)
+                        _ = SendSafeAsync(sendClient, errMsg);
+                    return;
+                }
+            }
+            else
+            {
+                processed = message;
+            }
+            Log($"MSG QUEUED: {processed.Trim().Substring(0, Math.Min(processed.Length, LogPreviewLength))}");
+            _mainThreadQueue.Enqueue(() => HandleMessage(processed));
+#if UNITY_EDITOR
+            // Wake up Unity's main loop when a message is queued.
+            // Without this, when the Editor window is unfocused, EditorApplication.update
+            // may not fire frequently enough (or at all), causing the queue to never drain
+            // and tool calls to time out.
+            UnityEditor.EditorApplication.QueuePlayerLoopUpdate();
+#endif
+        }
+
+        private void OnServerConnected()
+        {
+            _mainThreadQueue.Enqueue(() =>
+            {
+                var encLabel = string.IsNullOrEmpty(SimpleMCPBridge.BridgeConfig.EncryptionKey) ? "" : " (encrypted)";
+                Log($"Connected to server — ws://{Host}:{Port}{encLabel}");
+                OnConnectedSuccess?.Invoke();
+            });
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.QueuePlayerLoopUpdate();
+#endif
+        }
+
+        private void OnServerDisconnected()
+        {
+            _mainThreadQueue.Enqueue(() =>
+            {
+                Log("Disconnected from server");
+                LogWarning("Disconnected from SimpleMcpServer");
+                OnDisconnected?.Invoke();
+            });
+        }
+
+        private void OnServerError(string err)
+        {
+            _mainThreadQueue.Enqueue(() =>
+            {
+                Log($"Client error: {err}");
+            });
+        }
+
         private void Log(string msg)
         {
             DebugUtils.Log(msg);
@@ -362,6 +419,15 @@ namespace SimpleMCPBridge.Runtime
         {
             var pattern = $"\"{key}\"";
             var idx = json.IndexOf(pattern, StringComparison.Ordinal);
+            while (idx >= 0)
+            {
+                // 向前跳过空白,检查前一个字符是否为 { 或 , (确保是 JSON key 而非 value 内的子串, Fix P2#2)
+                int i = idx - 1;
+                while (i >= 0 && char.IsWhiteSpace(json[i])) i--;
+                if (i < 0 || json[i] == '{' || json[i] == ',')
+                    break;
+                idx = json.IndexOf(pattern, idx + 1, StringComparison.Ordinal);
+            }
             if (idx < 0) return null;
             var colon = json.IndexOf(':', idx);
             if (colon < 0) return null;

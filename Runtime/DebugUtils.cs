@@ -35,7 +35,7 @@ namespace SimpleMCPBridge.Runtime
                     writer.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] {msg}");
                 }
             }
-            catch { }
+            catch (Exception ex) { UnityEngine.Debug.LogError($"[DebugUtils] log write failed: {ex.Message}"); }
         }
     }
 }

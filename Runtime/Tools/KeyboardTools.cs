@@ -21,6 +21,9 @@ namespace SimpleMCPBridge
         // never interfering with the physical keyboard.
         private static readonly System.Collections.Generic.HashSet<Key> _trackedKeys = new();
 
+        /// <summary>Get the set of keys currently tracked (held by the bridge via HoldKey/HoldKeys).</summary>
+        public static System.Collections.Generic.IReadOnlyCollection<Key> TrackedKeys => _trackedKeys;
+
         /// <summary>
         /// Tap a key (press + immediate release). Use for one-shot actions: jump, shoot, interact.
         /// </summary>

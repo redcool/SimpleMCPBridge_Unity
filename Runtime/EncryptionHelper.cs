@@ -11,8 +11,9 @@ namespace SimpleMCPBridge
     /// Both Bridge and Server must use the same encryptionKey.
     /// Empty key = no encryption (passthrough).
     ///
-    /// Encrypted format: {"encrypted":"<base64(IV + ciphertext)>"}
+    /// Encrypted format: #ENC#<base64(IV + ciphertext)>
     /// Key derivation: SHA-256(encryptionKey)
+    /// NOTE: The server-side decryption must also use the #ENC# prefix.
     /// </summary>
     public static class EncryptionHelper
     {
@@ -24,7 +25,8 @@ namespace SimpleMCPBridge
         {
             if (string.IsNullOrEmpty(key)) return plainText;
 
-            var keyBytes = SHA256.Create().ComputeHash(Encoding.UTF8.GetBytes(key));
+            using var sha = SHA256.Create();
+            var keyBytes = sha.ComputeHash(Encoding.UTF8.GetBytes(key));
 
             using var aes = Aes.Create();
             aes.KeySize = 256;
@@ -47,7 +49,7 @@ namespace SimpleMCPBridge
             Buffer.BlockCopy(iv, 0, combined, 0, iv.Length);
             Buffer.BlockCopy(cipherBytes, 0, combined, iv.Length, cipherBytes.Length);
 
-            return "{\"encrypted\":\"" + Convert.ToBase64String(combined) + "\"}";
+            return "#ENC#" + Convert.ToBase64String(combined);
         }
 
         /// <summary>
@@ -73,7 +75,8 @@ namespace SimpleMCPBridge
                 Buffer.BlockCopy(combined, 0, iv, 0, 16);
                 Buffer.BlockCopy(combined, 16, cipherBytes, 0, cipherBytes.Length);
 
-                var keyBytes = SHA256.Create().ComputeHash(Encoding.UTF8.GetBytes(key));
+                using var sha = SHA256.Create();
+                var keyBytes = sha.ComputeHash(Encoding.UTF8.GetBytes(key));
 
                 using var aes = Aes.Create();
                 aes.KeySize = 256;
@@ -94,23 +97,16 @@ namespace SimpleMCPBridge
         }
 
         /// <summary>
-        /// Extracts the string value of "encrypted" key from the JSON wrapper.
-        /// Uses JsonUtility for robust parsing — handles multi-field JSON correctly.
-        /// Returns null if the JSON doesn't contain an "encrypted" field.
+        /// Extracts the base64 payload after the "#ENC#" prefix.
+        /// Returns null if the string doesn't start with "#ENC#".
+        /// NOTE: Server must also use the #ENC# prefix.
         /// </summary>
-        [Serializable]
-        private class EncryptedWrapper
+        private static string ExtractEncryptedValue(string data)
         {
-            public string encrypted = "";
-        }
+            if (string.IsNullOrEmpty(data)) return null;
+            if (!data.TrimStart().StartsWith("#ENC#")) return null;
 
-        private static string ExtractEncryptedValue(string json)
-        {
-            if (string.IsNullOrEmpty(json)) return null;
-            if (!json.TrimStart().StartsWith("{\"encrypted\":")) return null;
-
-            var wrapper = JsonUtility.FromJson<EncryptedWrapper>(json);
-            return wrapper?.encrypted;
+            return data.Substring(data.IndexOf("#ENC#", StringComparison.Ordinal) + 5).Trim();
         }
     }
 }

@@ -183,9 +183,9 @@ namespace SimpleMCPBridge.Runtime.Tools
                         }
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Silently skip TMP scanning on error
+                    UnityEngine.Debug.LogWarning($"[UIAnalysisTools] TMP scan skipped: {ex.Message}");
                 }
             }
 
@@ -375,7 +375,7 @@ namespace SimpleMCPBridge.Runtime.Tools
                         if (!string.IsNullOrEmpty(txt)) return txt;
                     }
                 }
-                catch { }
+                catch (Exception ex) { UnityEngine.Debug.LogWarning($"[UIAnalysisTools] button label reflection error: {ex.Message}"); }
             }
 
             var text = btn.GetComponentInChildren<Text>();
@@ -399,7 +399,7 @@ namespace SimpleMCPBridge.Runtime.Tools
                         if (!string.IsNullOrEmpty(txt)) return txt;
                     }
                 }
-                catch { }
+                catch (Exception ex) { UnityEngine.Debug.LogWarning($"[UIAnalysisTools] toggle label reflection error: {ex.Message}"); }
             }
 
             var text = tog.GetComponentInChildren<Text>();

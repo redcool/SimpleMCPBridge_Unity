@@ -159,13 +159,15 @@ namespace SimpleMCPBridge.Runtime
             _disconnecting = true;
             _cts?.Cancel();
             // Wait briefly for in-flight send to finish (cooperative handover)
-            try { _sendLock.Wait(DisconnectTimeoutMs); } catch { }
-            try { _sendLock.Release(); } catch { }
+            if (_sendLock.Wait(DisconnectTimeoutMs))
+            {
+                try { _sendLock.Release(); } catch (Exception ex) { UnityEngine.Debug.LogWarning($"[WebSocket] send-lock release failed: {ex.Message}"); }
+            }
             _cts?.Dispose();
             _cts = null;
             if (_tcpClient != null)
             {
-                try { _tcpClient.Close(); } catch { }
+                try { _tcpClient.Close(); } catch (Exception ex) { UnityEngine.Debug.LogWarning($"[WebSocket] tcp close failed: {ex.Message}"); }
                 _tcpClient = null;
             }
             _stream = null;
@@ -233,15 +235,16 @@ namespace SimpleMCPBridge.Runtime
 
             header.AddRange(maskKey); // MaskKeySize-byte mask key
 
-            await _stream.WriteAsync(header.ToArray(), 0, header.Count);
+            var ct = _cts?.Token ?? CancellationToken.None;
+            await _stream.WriteAsync(header.ToArray(), 0, header.Count, ct);
 
             // Mask payload
             var masked = new byte[payload.Length];
             for (int i = 0; i < payload.Length; i++)
                 masked[i] = (byte)(payload[i] ^ maskKey[i % MaskKeySize]);
 
-            await _stream.WriteAsync(masked, 0, masked.Length);
-            await _stream.FlushAsync();
+            await _stream.WriteAsync(masked, 0, masked.Length, ct);
+            await _stream.FlushAsync(ct);
         }
 
         // ── Receive buffer management ──

@@ -29,6 +29,10 @@ namespace SimpleMCPBridge.Runtime.Handlers
         /// Cache for instanceId → GameObject lookups.
         /// </summary>
         private static readonly Dictionary<int, GameObject> s_instanceIdCache = new();
+        /// <summary>
+        /// Cache for component type name → Type lookups (avoids repetitive assembly iteration).
+        /// </summary>
+        private static readonly Dictionary<string, Type> _typeCache = new();
         [MCPTool(MCPMethodConst.GET_HIERARCHY, "Get the full scene hierarchy as a tree of objects with position, components, children, and transform path")]
         public static string GetHierarchy(string paramsJson)
         {
@@ -437,27 +441,11 @@ namespace SimpleMCPBridge.Runtime.Handlers
 
             var componentType = GetRequiredString(args, "componentType");
 
-            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            var type = FindTypeCached(componentType);
+            if (type != null)
             {
-                Type[] types;
-                try
-                {
-                    types = assembly.GetTypes();
-                }
-                catch (ReflectionTypeLoadException ex)
-                {
-                    types = ex.Types;
-                    if (types == null) continue;
-                }
-                foreach (var type in types)
-                {
-                    if (type == null) continue;
-                    if (type.Name == componentType && type.IsSubclassOf(typeof(Component)) && !type.IsAbstract)
-                    {
-                        SceneObjectTools.UndoAddComponent(go, type);
-                        return JsonHelper.BuildJsonObject(("success", "true"));
-                    }
-                }
+                SceneObjectTools.UndoAddComponent(go, type);
+                return JsonHelper.BuildJsonObject(("success", "true"));
             }
 
             return ErrorJson($"Component type '{componentType}' not found in any assembly");
@@ -700,6 +688,55 @@ namespace SimpleMCPBridge.Runtime.Handlers
                     string.Equals(comp.GetType().Name, typeName, StringComparison.OrdinalIgnoreCase))
                     return comp;
             }
+            return null;
+        }
+
+        /// <summary>
+        /// Find a Component type by name using a static cache to avoid iterating
+        /// all assemblies on every call. Falls back to ResolveComponentType for
+        /// Unity-internal types (UI, TMPro, Physics, etc.).
+        /// </summary>
+        private static Type FindTypeCached(string typeName)
+        {
+            if (string.IsNullOrEmpty(typeName)) return null;
+
+            // Check cache first
+            if (_typeCache.TryGetValue(typeName, out var cached))
+                return cached;
+
+            // Try ResolveComponentType first (fast path for well-known Unity types)
+            var resolved = ResolveComponentType(typeName);
+            if (resolved != null)
+            {
+                _typeCache[typeName] = resolved;
+                return resolved;
+            }
+
+            // Fallback: iterate all assemblies once, cache on success
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type[] types;
+                try
+                {
+                    types = assembly.GetTypes();
+                }
+                catch (ReflectionTypeLoadException ex)
+                {
+                    types = ex.Types;
+                    if (types == null) continue;
+                }
+                foreach (var type in types)
+                {
+                    if (type == null) continue;
+                    if (type.Name == typeName && type.IsSubclassOf(typeof(Component)) && !type.IsAbstract)
+                    {
+                        _typeCache[typeName] = type;
+                        return type;
+                    }
+                }
+            }
+
+            _typeCache[typeName] = null;
             return null;
         }
 

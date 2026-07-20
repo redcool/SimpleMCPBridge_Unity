@@ -36,6 +36,8 @@ namespace SimpleMCPBridge.Runtime.Handlers
         private static string _lastExportPath;
         private static string _lastError;
 
+        private static readonly object _stateLock = new();
+
         private const int MAX_KEEP_FILES = 5;
 
         // ─── recording.start ──────────────────────────────────────────────
@@ -50,83 +52,85 @@ namespace SimpleMCPBridge.Runtime.Handlers
             Platform = MCPToolPlatforms.Android | MCPToolPlatforms.iOS | MCPToolPlatforms.Standalone)]
         public static string StartRecording(string paramsJson)
         {
-
-            if (_session != null)
+            lock (_stateLock)
+            {
+                if (_session != null)
                 return ErrorJson("Already recording. Call recording.stop first.");
 
-            // Clean up stale state (e.g. from previous Play Mode without domain reload)
-            ResetState();
+                // Clean up stale state (e.g. from previous Play Mode without domain reload)
+                ResetState();
 
-            var args = ParseJsonObject(paramsJson);
-            int width = (int)GetOptionalInt(args, "width").GetValueOrDefault(1280);
-            int height = (int)GetOptionalInt(args, "height").GetValueOrDefault(720);
-            int fps = (int)GetOptionalInt(args, "fps").GetValueOrDefault(30);
-            bool enableAudio = args.TryGetValue("enableAudio", out var audioVal) &&
-                (audioVal is bool b ? b : (bool.TryParse(audioVal?.ToString(), out var r) && r));
-            int quality = (int)GetOptionalInt(args, "quality").GetValueOrDefault(50);
+                var args = ParseJsonObject(paramsJson);
+                int width = (int)GetOptionalInt(args, "width").GetValueOrDefault(1280);
+                int height = (int)GetOptionalInt(args, "height").GetValueOrDefault(720);
+                int fps = (int)GetOptionalInt(args, "fps").GetValueOrDefault(30);
+                bool enableAudio = args.TryGetValue("enableAudio", out var audioVal) &&
+                    (audioVal is bool b ? b : (bool.TryParse(audioVal?.ToString(), out var r) && r));
+                int quality = (int)GetOptionalInt(args, "quality").GetValueOrDefault(50);
 
-            try
-            {
-                // Ensure even resolution (encoder requirement for most codecs)
-                width = Mathf.Clamp(width % 2 == 0 ? width : width + 1, 320, 3840);
-                height = Mathf.Clamp(height % 2 == 0 ? height : height + 1, 240, 2160);
-
-                int bitrate = RecordingTools.QualityToBitrate(quality);
-
-                var options = new RealtimeEncodingOptions
+                try
                 {
-                    VideoOptions = new VideoEncoderOptions
+                    // Ensure even resolution (encoder requirement for most codecs)
+                    width = Mathf.Clamp(width % 2 == 0 ? width : width + 1, 320, 3840);
+                    height = Mathf.Clamp(height % 2 == 0 ? height : height + 1, 240, 2160);
+
+                    int bitrate = RecordingTools.QualityToBitrate(quality);
+
+                    var options = new RealtimeEncodingOptions
                     {
-                        Width = (uint)Mathf.Clamp(width, 320, 3840),
-                        Height = (uint)Mathf.Clamp(height, 240, 2160),
-                        FpsHint = (uint)Mathf.Clamp(fps, 1, 120),
-                        Bitrate = (uint)bitrate
-                    },
-                    AudioOptions = new AudioEncoderOptions
-                    {
-                        SampleRate = 44100,
-                        Channels = 2,
-                        Bitrate = 128000
-                    },
-                    FixedFrameRate = Mathf.Clamp(fps, 1, 120),
-                    VideoInputQueueSize = 5,
-                    AudioInputQueueSizeSeconds = 1.0,
-                    MaxMemoryUsageBytesForCompressedFrames = 20L * 1024 * 1024,
-                    ForceReadback = false, // FreshFrameProvider gives unique textures per frame — no race
-                };
+                        VideoOptions = new VideoEncoderOptions
+                        {
+                            Width = (uint)Mathf.Clamp(width, 320, 3840),
+                            Height = (uint)Mathf.Clamp(height, 240, 2160),
+                            FpsHint = (uint)Mathf.Clamp(fps, 1, 120),
+                            Bitrate = (uint)bitrate
+                        },
+                        AudioOptions = new AudioEncoderOptions
+                        {
+                            SampleRate = 44100,
+                            Channels = 2,
+                            Bitrate = 128000
+                        },
+                        FixedFrameRate = Mathf.Clamp(fps, 1, 120),
+                        VideoInputQueueSize = 5,
+                        AudioInputQueueSizeSeconds = 1.0,
+                        MaxMemoryUsageBytesForCompressedFrames = 20L * 1024 * 1024,
+                        ForceReadback = false, // FreshFrameProvider gives unique textures per frame — no race
+                    };
 
-                _outputPath = RecordingTools.BuildOutputPath();
-                Directory.CreateDirectory(Path.GetDirectoryName(_outputPath)!);
+                    _outputPath = RecordingTools.BuildOutputPath();
+                    Directory.CreateDirectory(Path.GetDirectoryName(_outputPath)!);
 
-                // Use FreshFrameProvider instead of ScreenshotFrameProvider to avoid
-                // RenderTexture reuse race — each frame gets its own texture.
-                _session = new UnboundedRecordingSession(
-                    _outputPath, options,
-                    frameProvider: new FreshFrameProvider(),
-                    disposeFrameProvider: true
-                );
+                    // Use FreshFrameProvider instead of ScreenshotFrameProvider to avoid
+                    // RenderTexture reuse race — each frame gets its own texture.
+                    _session = new UnboundedRecordingSession(
+                        _outputPath, options,
+                        frameProvider: new FreshFrameProvider(),
+                        disposeFrameProvider: true
+                    );
 
-                _startTime = DateTime.UtcNow;
-                _lastError = null;
-                _lastExportPath = null;
-                _exportTask = null;
+                    _startTime = DateTime.UtcNow;
+                    _lastError = null;
+                    _lastExportPath = null;
+                    _exportTask = null;
 
-                DebugUtils.Log($"[Recording] Started: {_outputPath} ({width}x{height}, {fps}fps, audio={enableAudio}, quality={quality})");
+                    DebugUtils.Log($"[Recording] Started: {_outputPath} ({width}x{height}, {fps}fps, audio={enableAudio}, quality={quality})");
 
-                return JsonHelper.BuildJsonObject(
-                    ("success", "true"),
-                    ("outputPath", JsonHelper.EscapeString(_outputPath)),
-                    ("width", width.ToString()),
-                    ("height", height.ToString()),
-                    ("fps", fps.ToString()),
-                    ("enableAudio", enableAudio ? "true" : "false")
-                );
-            }
-            catch (Exception ex)
-            {
-                CleanupSession();
-                _lastError = ex.Message;
-                return ErrorJson($"Failed to start recording: {ex.Message}");
+                    return JsonHelper.BuildJsonObject(
+                        ("success", "true"),
+                        ("outputPath", JsonHelper.EscapeString(_outputPath)),
+                        ("width", width.ToString()),
+                        ("height", height.ToString()),
+                        ("fps", fps.ToString()),
+                        ("enableAudio", enableAudio ? "true" : "false")
+                    );
+                }
+                catch (Exception ex)
+                {
+                    CleanupSession();
+                    _lastError = ex.Message;
+                    return ErrorJson($"Failed to start recording: {ex.Message}");
+                }
             }
         }
 
@@ -138,35 +142,38 @@ namespace SimpleMCPBridge.Runtime.Handlers
             Platform = MCPToolPlatforms.Android | MCPToolPlatforms.iOS | MCPToolPlatforms.Standalone)]
         public static string StopRecording(string paramsJson)
         {
-            // Already completed (previous export still stored)
-            if (_session == null)
+            lock (_stateLock)
             {
-                if (!string.IsNullOrEmpty(_lastExportPath))
-                    return RecordingTools.BuildCompletedJson(_lastExportPath);
-                if (!string.IsNullOrEmpty(_lastError))
-                    return RecordingTools.BuildErrorJson(_lastError);
-                return ErrorJson("No active recording.");
-            }
+                // Already completed (previous export still stored)
+                if (_session == null)
+                {
+                    if (!string.IsNullOrEmpty(_lastExportPath))
+                        return RecordingTools.BuildCompletedJson(_lastExportPath);
+                    if (!string.IsNullOrEmpty(_lastError))
+                        return RecordingTools.BuildErrorJson(_lastError);
+                    return ErrorJson("No active recording.");
+                }
 
-            // Already in export
-            if (_exportTask != null)
-            {
+                // Already in export
+                if (_exportTask != null)
+                {
+                    return JsonHelper.BuildJsonObject(
+                        ("success", "true"),
+                        ("status", JsonHelper.EscapeString("encoding")),
+                        ("message", JsonHelper.EscapeString("Already encoding previous recording."))
+                    );
+                }
+
+                // Start async export (fire-and-forget, poll via status)
+                _exportTask = ExportAsync();
+
+                DebugUtils.Log("[Recording] Stopped, encoding to MP4...");
                 return JsonHelper.BuildJsonObject(
                     ("success", "true"),
                     ("status", JsonHelper.EscapeString("encoding")),
-                    ("message", JsonHelper.EscapeString("Already encoding previous recording."))
+                    ("message", JsonHelper.EscapeString("Recording stopped. Encoding to MP4..."))
                 );
             }
-
-            // Start async export (fire-and-forget, poll via status)
-            _exportTask = ExportAsync();
-
-            DebugUtils.Log("[Recording] Stopped, encoding to MP4...");
-            return JsonHelper.BuildJsonObject(
-                ("success", "true"),
-                ("status", JsonHelper.EscapeString("encoding")),
-                ("message", JsonHelper.EscapeString("Recording stopped. Encoding to MP4..."))
-            );
         }
 
         // ─── recording.status ──────────────────────────────────────────────
@@ -177,71 +184,74 @@ namespace SimpleMCPBridge.Runtime.Handlers
             Platform = MCPToolPlatforms.Android | MCPToolPlatforms.iOS | MCPToolPlatforms.Standalone)]
         public static string GetStatus(string paramsJson)
         {
-            var invariant = System.Globalization.CultureInfo.InvariantCulture;
-
-            // Currently recording
-            if (_session != null && _exportTask == null)
+            lock (_stateLock)
             {
-                float elapsed = (float)(DateTime.UtcNow - _startTime).TotalSeconds;
-                return JsonHelper.BuildJsonObject(
-                    ("isRecording", "true"),
-                    ("state", JsonHelper.EscapeString("recording")),
-                    ("elapsedSeconds", elapsed.ToString("F1", invariant))
-                );
-            }
+                var invariant = System.Globalization.CultureInfo.InvariantCulture;
 
-            // Export in progress
-            if (_exportTask != null && !_exportTask.IsCompleted)
-            {
-                return JsonHelper.BuildJsonObject(
-                    ("isRecording", "false"),
-                    ("state", JsonHelper.EscapeString("encoding"))
-                );
-            }
-
-            // Export just completed — consume result
-            if (_exportTask != null && _exportTask.IsCompleted)
-            {
-                _exportTask = null;
-                CleanupSession();
-
-                if (!string.IsNullOrEmpty(_lastExportPath))
+                // Currently recording
+                if (_session != null && _exportTask == null)
                 {
-                    var dir = Path.GetDirectoryName(_lastExportPath);
-                    if (!string.IsNullOrEmpty(dir))
-                        RecordingTools.CleanupOldRecordings(dir, MAX_KEEP_FILES);
-
-                    DebugUtils.Log($"[Recording] Exported: {_lastExportPath}");
-                    return RecordingTools.BuildCompletedJson(_lastExportPath);
+                    float elapsed = (float)(DateTime.UtcNow - _startTime).TotalSeconds;
+                    return JsonHelper.BuildJsonObject(
+                        ("isRecording", "true"),
+                        ("state", JsonHelper.EscapeString("recording")),
+                        ("elapsedSeconds", elapsed.ToString("F1", invariant))
+                    );
                 }
 
-                return RecordingTools.BuildErrorJson(_lastError ?? "Recording failed with unknown error.");
-            }
+                // Export in progress
+                if (_exportTask != null && !_exportTask.IsCompleted)
+                {
+                    return JsonHelper.BuildJsonObject(
+                        ("isRecording", "false"),
+                        ("state", JsonHelper.EscapeString("encoding"))
+                    );
+                }
 
-            // Idle with previous export
-            if (!string.IsNullOrEmpty(_lastExportPath))
-            {
+                // Export just completed — consume result
+                if (_exportTask != null && _exportTask.IsCompleted)
+                {
+                    _exportTask = null;
+                    CleanupSession();
+
+                    if (!string.IsNullOrEmpty(_lastExportPath))
+                    {
+                        var dir = Path.GetDirectoryName(_lastExportPath);
+                        if (!string.IsNullOrEmpty(dir))
+                            RecordingTools.CleanupOldRecordings(dir, MAX_KEEP_FILES);
+
+                        DebugUtils.Log($"[Recording] Exported: {_lastExportPath}");
+                        return RecordingTools.BuildCompletedJson(_lastExportPath);
+                    }
+
+                    return RecordingTools.BuildErrorJson(_lastError ?? "Recording failed with unknown error.");
+                }
+
+                // Idle with previous export
+                if (!string.IsNullOrEmpty(_lastExportPath))
+                {
+                    return JsonHelper.BuildJsonObject(
+                        ("isRecording", "false"),
+                        ("state", JsonHelper.EscapeString("idle")),
+                        ("lastExportPath", JsonHelper.EscapeString(_lastExportPath))
+                    );
+                }
+
+                // Sticky error
+                if (!string.IsNullOrEmpty(_lastError))
+                {
+                    return JsonHelper.BuildJsonObject(
+                        ("isRecording", "false"),
+                        ("state", JsonHelper.EscapeString("error")),
+                        ("error", JsonHelper.EscapeString(_lastError))
+                    );
+                }
+
                 return JsonHelper.BuildJsonObject(
                     ("isRecording", "false"),
-                    ("state", JsonHelper.EscapeString("idle")),
-                    ("lastExportPath", JsonHelper.EscapeString(_lastExportPath))
+                    ("state", JsonHelper.EscapeString("idle"))
                 );
             }
-
-            // Sticky error
-            if (!string.IsNullOrEmpty(_lastError))
-            {
-                return JsonHelper.BuildJsonObject(
-                    ("isRecording", "false"),
-                    ("state", JsonHelper.EscapeString("error")),
-                    ("error", JsonHelper.EscapeString(_lastError))
-                );
-            }
-
-            return JsonHelper.BuildJsonObject(
-                ("isRecording", "false"),
-                ("state", JsonHelper.EscapeString("idle"))
-            );
         }
 
         // ─── Async export ──────────────────────────────────────────────────
@@ -256,11 +266,20 @@ namespace SimpleMCPBridge.Runtime.Handlers
         /// </summary>
         private static async Task ExportAsync()
         {
+            // Capture session + outputPath under lock before any async work
+            UnboundedRecordingSession session;
+            string outputPath;
+            lock (_stateLock)
+            {
+                session = _session;
+                outputPath = _outputPath;
+            }
+
             try
             {
                 // CompleteAsync returns non-generic ValueTask (no .AsTask() in .NET Standard 2.1).
                 // Bridge to Task via TaskCompletionSource for use with Task.WhenAny.
-                var vt = _session.CompleteAsync();
+                var vt = session.CompleteAsync();
                 var tcs = new TaskCompletionSource<bool>();
                 vt.GetAwaiter().OnCompleted(() =>
                 {
@@ -281,24 +300,33 @@ namespace SimpleMCPBridge.Runtime.Handlers
 
                 if (completed == timeoutTask)
                 {
-                    _lastExportPath = null;
-                    _lastError = "Recording export timed out. The encoder may have stalled. Call recording.reset to recover.";
+                    lock (_stateLock)
+                    {
+                        _lastExportPath = null;
+                        _lastError = "Recording export timed out. The encoder may have stalled. Call recording.reset to recover.";
+                    }
                     CleanupSession();
-                    DebugUtils.LogError($"[Recording] {_lastError}");
+                    DebugUtils.LogError("[Recording] Recording export timed out. The encoder may have stalled.");
                     return;
                 }
 
                 // Propagate any exception from CompleteAsync
                 await completeTask;
-                _lastExportPath = _outputPath;
-                _lastError = null;
+                lock (_stateLock)
+                {
+                    _lastExportPath = outputPath;
+                    _lastError = null;
+                }
             }
             catch (Exception ex)
             {
-                _lastExportPath = null;
-                _lastError = $"Recording export failed: {ex.Message}";
+                lock (_stateLock)
+                {
+                    _lastExportPath = null;
+                    _lastError = $"Recording export failed: {ex.Message}";
+                }
                 CleanupSession();
-                DebugUtils.LogError($"[Recording] {_lastError}");
+                DebugUtils.LogError($"[Recording] Recording export failed: {ex.Message}");
             }
         }
 
@@ -309,13 +337,16 @@ namespace SimpleMCPBridge.Runtime.Handlers
             Platform = MCPToolPlatforms.Android | MCPToolPlatforms.iOS | MCPToolPlatforms.Standalone)]
         public static string ResetRecording(string paramsJson)
         {
-            CleanupSession();
-            ResetState();
-            DebugUtils.Log("[Recording] Force reset by user request.");
-            return JsonHelper.BuildJsonObject(
-                ("success", "true"),
-                ("message", JsonHelper.EscapeString("Recording state reset. Previous session abandoned."))
-            );
+            lock (_stateLock)
+            {
+                CleanupSession();
+                ResetState();
+                DebugUtils.Log("[Recording] Force reset by user request.");
+                return JsonHelper.BuildJsonObject(
+                    ("success", "true"),
+                    ("message", JsonHelper.EscapeString("Recording state reset. Previous session abandoned."))
+                );
+            }
         }
 
         // ─── State reset (required for enter Play Mode without domain reload) ─
@@ -323,26 +354,35 @@ namespace SimpleMCPBridge.Runtime.Handlers
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void ResetOnLoad()
         {
-            ResetState();
-            // _session can't survive domain reload — Unity destroys it
-            _session = null;
+            lock (_stateLock)
+            {
+                ResetState();
+                // _session can't survive domain reload — Unity destroys it
+                _session = null;
+            }
         }
 
         // ─── Helpers ───────────────────────────────────────────────────────
 
         public static void ResetState()
         {
-            _outputPath = null;
-            _startTime = default;
-            _lastExportPath = null;
-            _lastError = null;
-            _exportTask = null;
+            lock (_stateLock)
+            {
+                _outputPath = null;
+                _startTime = default;
+                _lastExportPath = null;
+                _lastError = null;
+                _exportTask = null;
+            }
         }
 
         public static void CleanupSession()
         {
-            _session?.Dispose();
-            _session = null;
+            lock (_stateLock)
+            {
+                _session?.Dispose();
+                _session = null;
+            }
         }
 
     }

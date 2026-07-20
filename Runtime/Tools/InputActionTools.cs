@@ -47,7 +47,7 @@ namespace SimpleMCPBridge.Runtime.Tools
                     if (_virtualGamepad != null)
                         _virtualGamepad = null;
 
-                    _virtualGamepad = InputSystem.AddDevice<Gamepad>("VirtualAgentGamepad");
+                    _virtualGamepad = InputSystem.AddDevice<Gamepad>("VirtualAgentInputGamepad");
                 }
                 return _virtualGamepad;
             }
@@ -153,7 +153,8 @@ namespace SimpleMCPBridge.Runtime.Tools
             }
 
             InputSystem.QueueStateEvent(gp, state);
-            InputSystem.Update();
+            // Do NOT call InputSystem.Update() — it can cause Play Mode stalls/deadlocks.
+            // Events are processed by Unity's native player loop instead.
 
             s_lastGamepadState = state;
 
@@ -186,7 +187,8 @@ namespace SimpleMCPBridge.Runtime.Tools
 
             s_lastGamepadState = new GamepadState(); // all zero = neutral
             InputSystem.QueueStateEvent(_virtualGamepad, s_lastGamepadState);
-            InputSystem.Update();
+            // Do NOT call InputSystem.Update() — it can cause Play Mode stalls/deadlocks.
+            // Events are processed by Unity's native player loop instead.
         }
 
         // ── Scroll Wheel ──
@@ -209,7 +211,8 @@ namespace SimpleMCPBridge.Runtime.Tools
             };
 
             InputSystem.QueueStateEvent(mouse, state);
-            InputSystem.Update();
+            // Do NOT call InputSystem.Update() — it can cause Play Mode stalls/deadlocks.
+            // Events are processed by Unity's native player loop instead.
         }
 
         // ── Combined action ──

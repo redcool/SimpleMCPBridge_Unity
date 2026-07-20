@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -37,7 +38,7 @@ namespace SimpleMCPBridge.Runtime
         public static event Action<string, string> OnResponseReceived;
 
         private static BridgeClient _bridge;
-        private static readonly Dictionary<string, TaskCompletionSource<string>> _pending = new();
+        private static readonly ConcurrentDictionary<string, TaskCompletionSource<string>> _pending = new();
         private static int _requestCounter;
 
         /// <summary>
@@ -53,11 +54,13 @@ namespace SimpleMCPBridge.Runtime
             {
                 _bridge.OnAIResponse -= HandleAIResponse;
                 _bridge.OnConnectedSuccess -= OnBridgeConnected;
+                _bridge.OnDisconnected -= OnBridgeDisconnected;
             }
 
             _bridge = bridge;
             _bridge.OnAIResponse += HandleAIResponse;
             _bridge.OnConnectedSuccess += OnBridgeConnected;
+            _bridge.OnDisconnected += OnBridgeDisconnected;
         }
 
         /// <summary>
@@ -68,6 +71,7 @@ namespace SimpleMCPBridge.Runtime
             if (_bridge == null) return;
             _bridge.OnAIResponse -= HandleAIResponse;
             _bridge.OnConnectedSuccess -= OnBridgeConnected;
+            _bridge.OnDisconnected -= OnBridgeDisconnected;
             _bridge = null;
         }
 
@@ -75,6 +79,16 @@ namespace SimpleMCPBridge.Runtime
         {
             // Bridge reconnected — re-register
             // (OnConnectedSuccess is already wired to this handler via Register)
+        }
+
+        private static void OnBridgeDisconnected()
+        {
+            // Cancel all pending requests when the bridge disconnects (Fix I3)
+            foreach (var kv in _pending)
+            {
+                kv.Value.TrySetException(new Exception("Bridge disconnected"));
+            }
+            _pending.Clear();
         }
 
         /// <summary>
@@ -132,7 +146,7 @@ namespace SimpleMCPBridge.Runtime
                 }
                 catch (Exception ex)
                 {
-                    _pending.Remove(requestId);
+                    _pending.TryRemove(requestId, out var _);
                     throw new InvalidOperationException($"Failed to send AI request: {ex.Message}");
                 }
 
@@ -152,7 +166,7 @@ namespace SimpleMCPBridge.Runtime
                     }
                     finally
                     {
-                        _pending.Remove(requestId);
+                        _pending.TryRemove(requestId, out var _);
                     }
                 }
             }
@@ -181,7 +195,7 @@ namespace SimpleMCPBridge.Runtime
         {
             if (_pending.TryGetValue(requestId, out var tcs))
             {
-                _pending.Remove(requestId); // Fix 4: prevent leak for fire-and-forget calls
+                _pending.TryRemove(requestId, out var _); // Fix 4: prevent leak for fire-and-forget calls
                 if (text != null)
                     tcs.TrySetResult(text);
                 else

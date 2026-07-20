@@ -2,111 +2,28 @@
 using System.Collections.Generic;
 using System.Globalization;
 using SimpleMCPBridge.Runtime.Tools;
-using UnityEditor;
 using UnityEngine;
-using UnityEngine.EventSystems;
+#if UNITY_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.LowLevel;
+#endif
 using static SimpleMCPBridge.Runtime.Handlers.HandlerUtils;
 
 namespace SimpleMCPBridge.Runtime.Handlers
 {
     /// <summary>
-    /// Simulates user input through Unity's EventSystem pipeline.
-    /// All methods work in both Editor Play Mode and Runtime builds.
-    ///
-    /// Tools:
-    ///   - input.click_screen — simulate a click at a normalized screen position (0.0~1.0)
-    ///     Goes through full pointer event sequence: RaycastAll → PointerDown → PointerUp → PointerClick
+    /// Simulates user input through Unity's Input System.
+    /// Only compiles when the Input System package is installed (UNITY_INPUT_SYSTEM).
+    /// Without Input System, only input.click_screen (ScreenHandler) is available.
+    /// Tools: mouse_click, mouse_move, key_press, touch, swipe, gamepad.
     /// </summary>
     [MCPToolClass]
     public class InputHandler
     {
-        [MCPTool(MCPMethodConst.CLICK_SCREEN, "Simulate a user click at a screen position. " +
-            "Coordinates are normalized 0.0~1.0 (0.5,0.5 = center). " +
-            "Goes through Unity EventSystem: RaycastAll → PointerDown → PointerUp → PointerClick. " +
-            "Returns hit objects and which one received the click. " +
-            "Requires an active EventSystem in the scene (Play Mode or Runtime).")]
-        public static string ClickScreen(string paramsJson)
-        {
-            var args = ParseJsonObject(paramsJson);
-            return ProcessClick(args["x"], args["y"], 0);
-        }
-
-        public static string ProcessClick(object rawX, object rawY, int button)
-        {
-            var nx = System.Convert.ToSingle(rawX, CultureInfo.InvariantCulture);
-            var ny = System.Convert.ToSingle(rawY, CultureInfo.InvariantCulture);
-
-            // Validate EventSystem exists
-            if (EventSystem.current == null)
-                return ErrorJson("No active EventSystem in scene. This tool requires Play Mode or a Runtime build with an EventSystem.");
-
-            // Convert normalized coordinates to screen pixels
-            // (0,0) = bottom-left, (1,1) = top-right
-            var screenPos = new Vector2(nx * Screen.width, ny * Screen.height);
-
-            // Create PointerEventData
-            var pointerData = new PointerEventData(EventSystem.current)
-            {
-                position = screenPos,
-                button = PointerEventData.InputButton.Left,
-                pressPosition = screenPos,
-            };
-
-            // Raycast to find UI objects under the position
-            var results = new List<RaycastResult>();
-            EventSystem.current.RaycastAll(pointerData, results);
-
-            if (results.Count == 0)
-            {
-                return JsonHelper.BuildJsonObject(
-                    ("success", "false"),
-                    ("screenPos", JsonHelper.FloatArrayJson(new[] { screenPos.x, screenPos.y })),
-                    ("hitCount", "0"),
-                    ("error", JsonHelper.EscapeString("No UI object found at position"))
-                );
-            }
-
-            // Build hit list
-            var hitJsons = new List<string>();
-            foreach (var r in results)
-            {
-                hitJsons.Add(JsonHelper.BuildJsonObject(
-                    ("name", JsonHelper.EscapeString(r.gameObject.name)),
-                    ("path", JsonHelper.EscapeString(GetObjectPath(r.gameObject))),
-                    ("instanceId", r.gameObject.GetInstanceID().ToString(CultureInfo.InvariantCulture)),
-                    ("sortOrder", r.sortingOrder.ToString(CultureInfo.InvariantCulture))
-                ));
-            }
-
-            // Execute pointer events on the topmost hit (first result = topmost in UI)
-            var target = results[0].gameObject;
-
-            // Full click sequence: Down → Up → Click (all bubble up via ExecuteHierarchy
-            // so parent objects like Button receive the events even when the Raycast hits a child Text).
-            ExecuteEvents.ExecuteHierarchy(target, pointerData, ExecuteEvents.pointerDownHandler);
-            ExecuteEvents.ExecuteHierarchy(target, pointerData, ExecuteEvents.pointerUpHandler);
-            ExecuteEvents.ExecuteHierarchy(target, pointerData, ExecuteEvents.pointerClickHandler);
-
-            return JsonHelper.BuildJsonObject(
-                ("success", "true"),
-                ("screenPos", JsonHelper.FloatArrayJson(new[] { screenPos.x, screenPos.y })),
-                ("normalizedPos", JsonHelper.FloatArrayJson(new[] { nx, ny })),
-                ("hitCount", results.Count.ToString(CultureInfo.InvariantCulture)),
-                ("clicked", JsonHelper.BuildJsonObject(
-                    ("name", JsonHelper.EscapeString(target.name)),
-                    ("path", JsonHelper.EscapeString(GetObjectPath(target))),
-                    ("instanceId", target.GetInstanceID().ToString(CultureInfo.InvariantCulture))
-                )),
-                ("hits", JsonHelper.BuildJsonArray(hitJsons.ToArray()))
-            );
-        }
-
-        // ── 鼠标模拟 ──
-        // 使用 EventSystem ExecuteHierarchy 路径（与 click_screen 相同）。
-        // 适用于 UI 元素（Button、Toggle 等）。如需直接操作 Input System（3D 对象），
-        // 需后续扩展。
+        // ══════════════════════════════════════════════════════════════
+        //  All tools below require Input System
+        // ══════════════════════════════════════════════════════════════
+#if UNITY_INPUT_SYSTEM
 
         [MCPTool(MCPMethodConst.MOUSE_CLICK, "Simulate a mouse click at a normalized screen position. " +
             "Coordinates are normalized 0.0~1.0 (0.5,0.5 = center). " +
@@ -505,8 +422,85 @@ namespace SimpleMCPBridge.Runtime.Handlers
                 return defaultValue;
             return Convert.ToSingle(v, CultureInfo.InvariantCulture);
         }
+#endif // UNITY_INPUT_SYSTEM
+
+        // ── Input State Query ──
+
+        [MCPTool(MCPMethodConst.INPUT_GET_STATE,
+            "Get current virtual input state snapshot — tracked keys (held), mouse position, gamepad buttons and axes. " +
+            "No params. Returns: keys[], mouse{position,buttons}, gamepad{buttons[],axes{}}.",
+            Platform = MCPToolPlatforms.All)]
+        public static string GetInputState(string paramsJson)
+        {
+            var keyNames = new List<string>();
+            float[] mousePos = null;
+            var mouseBtns = new List<string>();
+            var gamepadBtns = new List<string>();
+            float lx = 0, ly = 0, rx = 0, ry = 0, lt = 0, rt = 0;
+
+#if UNITY_INPUT_SYSTEM
+            // ── Tracked keys ──
+            foreach (var key in KeyboardTools.TrackedKeys)
+                keyNames.Add(key.ToString().ToLowerInvariant());
+
+            // ── Mouse ──
+            var mouse = Mouse.current;
+            if (mouse != null)
+            {
+                var pos = mouse.position.ReadValue();
+                mousePos = new[] { pos.x / Screen.width, pos.y / Screen.height };
+                if (mouse.leftButton.isPressed) mouseBtns.Add("left");
+                if (mouse.rightButton.isPressed) mouseBtns.Add("right");
+                if (mouse.middleButton.isPressed) mouseBtns.Add("middle");
+            }
+
+            // ── Gamepad ──
+            var gpState = GamepadTools.GetCurrentState();
+            foreach (GamepadButton btn in Enum.GetValues(typeof(GamepadButton)))
+            {
+                if ((gpState.buttons & (1 << (int)btn)) != 0)
+                    gamepadBtns.Add(btn.ToString().ToLowerInvariant());
+            }
+            lx = gpState.leftStick.x;
+            ly = gpState.leftStick.y;
+            rx = gpState.rightStick.x;
+            ry = gpState.rightStick.y;
+            lt = gpState.leftTrigger;
+            rt = gpState.rightTrigger;
+#endif
+
+            // ── Build response ──
+            var mouseJson = mousePos != null
+                ? JsonHelper.BuildJsonObject(
+                    ("position", JsonHelper.FloatArrayJson(mousePos)),
+                    ("buttons", JsonHelper.EscapeString(string.Join(", ", mouseBtns)))
+                )
+                : "null";
+
+            var axesJson = JsonHelper.BuildJsonObject(
+                ("leftStickX", lx.ToString("G", CultureInfo.InvariantCulture)),
+                ("leftStickY", ly.ToString("G", CultureInfo.InvariantCulture)),
+                ("rightStickX", rx.ToString("G", CultureInfo.InvariantCulture)),
+                ("rightStickY", ry.ToString("G", CultureInfo.InvariantCulture)),
+                ("leftTrigger", lt.ToString("G", CultureInfo.InvariantCulture)),
+                ("rightTrigger", rt.ToString("G", CultureInfo.InvariantCulture))
+            );
+
+            var gamepadJson = JsonHelper.BuildJsonObject(
+                ("buttons", JsonHelper.StringArrayJson(gamepadBtns.ToArray())),
+                ("axes", axesJson)
+            );
+
+            return JsonHelper.BuildJsonObject(
+                ("success", "true"),
+                ("keys", JsonHelper.StringArrayJson(keyNames.ToArray())),
+                ("mouse", mouseJson),
+                ("gamepad", gamepadJson)
+            );
+        }
 
     }
+
 }
 
-// debug_touch 16:06:14
+// touch 14:48:43

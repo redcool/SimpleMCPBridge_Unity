@@ -21,6 +21,19 @@ namespace SimpleMCPBridge.Runtime.Handlers
     [MCPToolClass]
     public class EditorHandler
     {
+        // ─── editor.eval enabled flag (persisted via EditorPrefs) ──────────
+
+        /// <summary>
+        /// Global toggle for the editor.eval tool. Default ON.
+        /// Persisted via EditorPrefs to survive domain reload.
+        /// Safe to use here — the entire class is wrapped in #if UNITY_EDITOR.
+        /// </summary>
+        public static bool EvalEnabled
+        {
+            get => EditorPrefs.GetBool("SimpleMCPBridge_EvalEnabled", true);
+            set => EditorPrefs.SetBool("SimpleMCPBridge_EvalEnabled", value);
+        }
+
         // ─── Win32 window control (delegates to Win32Tools) ────────────────
 
         [MCPTool(MCPMethodConst.EDITOR_WINDOW_FOCUS,
@@ -75,6 +88,9 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "Example: 'GameObject.Find(\"Main Camera\").transform.position.ToString()'")]
         public static string Eval(string paramsJson)
         {
+            if (!EvalEnabled)
+                return ErrorJson("editor.eval is disabled. Enable it via the MCPBridge Inspector toggle.");
+
             var args = ParseJsonObject(paramsJson);
             var code = GetRequiredString(args, "code");
             if (string.IsNullOrWhiteSpace(code))
@@ -106,8 +122,6 @@ namespace SimpleMCPBridge.Runtime.Handlers
         // Circular buffer for console log cache
         private const int CONSOLE_CACHE_SIZE = 200;
         private static readonly List<ConsoleEntry> _consoleCache = new(CONSOLE_CACHE_SIZE);
-        private static bool _consoleInitialized;
-
         private class ConsoleEntry
         {
             public string message;
@@ -116,26 +130,28 @@ namespace SimpleMCPBridge.Runtime.Handlers
             public string time;
         }
 
+        private static void OnLogMessageReceived(string condition, string stackTrace, LogType type)
+        {
+            lock (_consoleCache)
+            {
+                _consoleCache.Add(new ConsoleEntry
+                {
+                    message = condition,
+                    stackTrace = stackTrace,
+                    type = type.ToString(),
+                    time = DateTime.Now.ToString("HH:mm:ss.fff"),
+                });
+                if (_consoleCache.Count > CONSOLE_CACHE_SIZE)
+                    _consoleCache.RemoveRange(0, _consoleCache.Count - CONSOLE_CACHE_SIZE);
+            }
+        }
+
         [InitializeOnLoadMethod]
         private static void InitConsoleCapture()
         {
-            if (_consoleInitialized) return;
-            _consoleInitialized = true;
-            Application.logMessageReceivedThreaded += (condition, stackTrace, type) =>
-            {
-                lock (_consoleCache)
-                {
-                    _consoleCache.Add(new ConsoleEntry
-                    {
-                        message = condition,
-                        stackTrace = stackTrace,
-                        type = type.ToString(),
-                        time = DateTime.Now.ToString("HH:mm:ss.fff"),
-                    });
-                    if (_consoleCache.Count > CONSOLE_CACHE_SIZE)
-                        _consoleCache.RemoveRange(0, _consoleCache.Count - CONSOLE_CACHE_SIZE);
-                }
-            };
+            // Unsubscribe first to prevent double-subscription across domain reloads
+            Application.logMessageReceivedThreaded -= OnLogMessageReceived;
+            Application.logMessageReceivedThreaded += OnLogMessageReceived;
         }
 
         [MCPTool(MCPMethodConst.GET_CONSOLE,
@@ -297,7 +313,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
                     sb.Append($@"{{""name"":{JsonHelper.EscapeString(f.Name)},""path"":{JsonHelper.EscapeString(f.FullName)},""type"":""file"",""size"":{f.Length}}}");
                 }
             }
-            catch (UnauthorizedAccessException) { }
+            catch (UnauthorizedAccessException ex) { UnityEngine.Debug.LogWarning($"[EditorHandler] access denied: {ex.Message}"); }
 
             if (depth == 0) sb.Append("]");
         }

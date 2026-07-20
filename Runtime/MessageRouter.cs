@@ -16,8 +16,16 @@ namespace SimpleMCPBridge.Runtime
     {
         private readonly MCPToolRegistry _registry;
 
+        /// <summary>
+        /// Singleton accessor for the most recently constructed router.
+        /// Used by game.batch to dispatch sub-calls without a tool→router reference.
+        /// Set in the constructor; safe because BridgeClient owns exactly one router.
+        /// </summary>
+        public static MessageRouter Instance { get; private set; }
+
         public MessageRouter()
         {
+            Instance = this;
             _registry = new MCPToolRegistry();
             _registry.AutoRegisterAll();
         }
@@ -28,6 +36,28 @@ namespace SimpleMCPBridge.Runtime
         public string GetToolsJson()
         {
             return _registry.ListToolsJson();
+        }
+
+        /// <summary>
+        /// Public dispatch for sub-tool invocation (used by game.batch).
+        /// Returns the tool's result JSON string (the raw result, not a JSON-RPC envelope).
+        /// On unknown tool or exception, returns an error JSON object instead of throwing.
+        /// </summary>
+        public string DispatchTool(string method, string paramsJson)
+        {
+            if (string.IsNullOrEmpty(method))
+                return @"{""success"":false,""error"":""Empty tool name""}";
+            if (!_registry.HasTool(method))
+                return $@"{{""success"":false,""error"":""Unknown tool: {JsonHelper.EscapeString(method)}""}}";
+            try
+            {
+                return _registry.Dispatch(method, paramsJson);
+            }
+            catch (Exception ex)
+            {
+                DebugUtils.LogError($"[Batch dispatch] Error calling '{method}': {ex.Message}");
+                return $@"{{""success"":false,""error"":""{JsonHelper.EscapeString(ex.Message)}""}}";
+            }
         }
 
         /// <summary>
@@ -81,14 +111,19 @@ namespace SimpleMCPBridge.Runtime
         private string BuildErrorResponse(string requestId, string errorMessage)
         {
             // JSON-RPC 2.0: error response MUST NOT include "result" field.
-            return $@"{{""id"":{JsonHelper.EscapeString(requestId ?? "")},""error"":{JsonHelper.EscapeString(errorMessage)}}}";
+            // Error must be an object with "code" (int) and "message" (string) per spec.
+            // id must be null (not empty string) when requestId is null (Fix P2#1)
+            string idJson = requestId != null ? JsonHelper.EscapeString(requestId) : "null";
+            return $@"{{""id"":{idJson},""error"":{{""code"":-32603,""message"":{JsonHelper.EscapeString(errorMessage)}}}}}";
         }
 
         private string BuildSuccessResponse(string requestId, string resultJson)
         {
             // Build manually so result is embedded as raw JSON, not an escaped string.
             // JSON-RPC 2.0: success response MUST NOT include "error" field.
-            return $@"{{""id"":{JsonHelper.EscapeString(requestId ?? "")},""result"":{resultJson ?? "null"}}}";
+            // id must be null (not empty string) when requestId is null (Fix P2#1)
+            string idJson = requestId != null ? JsonHelper.EscapeString(requestId) : "null";
+            return $@"{{""id"":{idJson},""result"":{resultJson ?? "null"}}}";
         }
     }
 }

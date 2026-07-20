@@ -112,6 +112,20 @@ namespace SimpleMCPBridge.Editor
             EditorGUILayout.PropertyField(_isAutoReconnectProp, new GUIContent("Auto Reconnect"));
             EditorGUILayout.PropertyField(_dontDestroyOnLoadProp, new GUIContent("Dont Destroy On Load"));
             EditorGUILayout.PropertyField(_mcpLogoProp, new GUIContent("MCP Logo Texture"));
+
+            EditorGUILayout.Space(4);
+            DrawEvalToggle();
+        }
+
+        private static void DrawEvalToggle()
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField("Editor Eval (global)", GUILayout.Width(EditorGUIUtility.labelWidth - 4));
+                var newEval = EditorGUILayout.Toggle(Runtime.Handlers.EditorHandler.EvalEnabled);
+                if (newEval != Runtime.Handlers.EditorHandler.EvalEnabled)
+                    Runtime.Handlers.EditorHandler.EvalEnabled = newEval;
+            }
         }
     }
 }

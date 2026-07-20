@@ -154,7 +154,10 @@ namespace SimpleMCPBridge.Runtime.Tools
         }
 
         /// <summary>Check if all swipes have completed.</summary>
-        public static bool IsSwiping => s_activeSwipes.Count > 0;
+        public static bool IsSwiping
+        {
+            get { lock (s_activeSwipes) { return s_activeSwipes.Count > 0; } }
+        }
 
         /// <summary>Cancel all active swipes (send Ended immediately).</summary>
         public static void CancelAllSwipes()
