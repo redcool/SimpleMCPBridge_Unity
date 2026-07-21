@@ -26,64 +26,13 @@ namespace SimpleMCPBridge.Runtime
     [ExecuteAlways]
     public class MCPBridge : MonoBehaviour
     {
-#if UNITY_EDITOR
-        // ── Static bootstrap: auto-recover after domain reload ──
-
-        [InitializeOnLoadMethod]
-        private static void AutoCreateOnLoad()
-        {
-            // Subscribe to EditorApplication.update as a fallback drain loop.
-            // This survives domain reload and runs even if MonoBehaviour.Update()
-            // stops being called (e.g. during scene transitions, play mode enter/exit).
-            EditorApplication.update -= StaticUpdate;
-            EditorApplication.update += StaticUpdate;
-
-            // delayCall: wait for scene to be fully deserialized
-            EditorApplication.delayCall += () =>
-            {
-                if (EditorApplication.isCompiling) return; // not ready yet
-                var existing = FindFirstObjectByType<MCPBridge>();
-                if (existing != null)
-                {
-                    Debug.Log($"[MCPBridge] Found existing component on '{existing.name}', skipping auto-create.");
-                    return;
-                }
-
-                var go = new GameObject("MCPBridge_Auto", typeof(MCPBridge));
-                go.hideFlags = HideFlags.DontSaveInBuild;
-                Debug.Log("[MCPBridge] Auto-created MCPBridge GameObject (domain-reload recovery).");
-            };
-        }
-
-        /// <summary>
-        /// Static fallback drain loop.
-        /// EditorApplication.update fires even when MonoBehaviour.Update() is not called
-        /// (e.g. after Enter Play Mode while scene objects are being rebuilt).
-        /// Duplicate-drain-safe: DrainQueue is a no-op if the queue is empty.
-        /// </summary>
-        private static void StaticUpdate()
-        {
-            var bridge = BridgeClient.Default;
-            if (bridge == null) return;
-            bridge.DrainQueue();
-            if (bridge.IsAutoReconnect && !bridge.IsConnected && EditorApplication.timeSinceStartup - s_lastAttempt > 3.0)
-            {
-                s_lastAttempt = EditorApplication.timeSinceStartup;
-                // Call ConnectToServer via an MCPBridge instance that knows the IP
-                var inst = FindFirstObjectByType<MCPBridge>();
-                if (inst != null && inst._bridge != null && inst._bridge == bridge)
-                    inst.Connect();
-            }
-        }
-        private static double s_lastAttempt;
-#endif
         [SerializeField] private string _serverIp = "127.0.0.1";
         [SerializeField] private int _serverPort = 45678;
 
         private const float ReconnectInterval = 3f;
 
         private BridgeClient _bridge;
-        private float _lastAttemptTime;
+        private double _lastAttemptTime;
         private string _lastError;
 
         // ── Inspector config ──
@@ -138,8 +87,51 @@ namespace SimpleMCPBridge.Runtime
 
         private void OnEnable()
         {
+            // 多实例防护:如果已有其他 MCPBridge 实例,禁用自己
+            var others = FindObjectsByType<MCPBridge>(FindObjectsSortMode.None);
+            foreach (var other in others)
+            {
+                if (other != this && other.enabled)
+                {
+                    Debug.Log($"[MCPBridge] Another MCPBridge exists on '{other.name}', disabling this one on '{gameObject.name}'.");
+                    enabled = false;
+                    return;
+                }
+            }
+
+#if UNITY_EDITOR
+            EditorApplication.update -= InstanceUpdate;
+            EditorApplication.update += InstanceUpdate;
+#endif
             ConnectIfNeeded();
         }
+
+        private void OnDisable()
+        {
+#if UNITY_EDITOR
+            EditorApplication.update -= InstanceUpdate;
+#endif
+        }
+
+#if UNITY_EDITOR
+        /// <summary>
+        /// EditorApplication.update callback — drains queue and reconnects in Edit Mode.
+        /// More reliable than MonoBehaviour.Update() during scene transitions and compilation.
+        /// Registered in OnEnable, unregistered in OnDisable — tied to component lifecycle.
+        /// </summary>
+        private void InstanceUpdate()
+        {
+            if (_bridge == null) return;
+            _bridge.IsAutoReconnect = isAutoReconnect;
+            _bridge.DrainQueue();
+
+            if (_bridge.IsAutoReconnect && !_bridge.IsConnected && EditorApplication.timeSinceStartup - _lastAttemptTime > ReconnectInterval)
+            {
+                _lastAttemptTime = EditorApplication.timeSinceStartup;
+                _bridge.ConnectToServer(_serverIp, _serverPort);
+            }
+        }
+#endif
 
         private void Update()
         {
