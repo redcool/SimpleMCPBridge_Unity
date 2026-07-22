@@ -1,4 +1,4 @@
-using SimpleMCPBridge.Runtime.Tools;
+﻿using SimpleMCPBridge.Runtime.Tools;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -380,9 +380,10 @@ namespace SimpleMCPBridge.Runtime.Handlers
                 try
                 {
                     var axisInfo = new List<string>();
-                    if (UnityEngine.InputSystem.InputSystem.actions != null)
+                    var allAssets = Resources.FindObjectsOfTypeAll<UnityEngine.InputSystem.InputActionAsset>();
+                    foreach (var asset in allAssets)
                     {
-                        foreach (var map in UnityEngine.InputSystem.InputSystem.actions.actionMaps)
+                        foreach (var map in asset.actionMaps)
                         {
                             foreach (var action in map.actions)
                             {
