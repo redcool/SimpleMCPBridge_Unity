@@ -68,6 +68,24 @@ namespace SimpleMCPBridge.Runtime
         /// <summary>修改材质颜色或贴图。</summary>
         public const string SET_MATERIAL = "scene.set_material";
 
+        // ── Shader 热替换工具 ──
+        /// <summary>从 AssetBundle 热替换 Shader（运行时，全局或按 path）。异步：用 shader.hot_replace_status 轮询。</summary>
+        public const string SHADER_HOT_REPLACE = "shader.hot_replace";
+        /// <summary>轮询 shader.hot_replace 的下载/替换进度与结果。</summary>
+        public const string SHADER_HOT_REPLACE_STATUS = "shader.hot_replace_status";
+        /// <summary>构建 shader AssetBundle 并上传到 server，返回手机可达的 abUrl（Editor only）。</summary>
+        public const string BUILD_BUNDLE = "asset.build_bundle";
+
+        // ── 通用 AssetBundle 热部署工具 ──
+        /// <summary>通用 AssetBundle 热部署：下载 AB，按资产类型(Shader/Material/Texture/AudioClip/Mesh/ScriptableObject/GameObject)自动分发。异步，用 assetbundle.hot_replace_status 轮询。</summary>
+        public const string ASSETBUNDLE_HOT_REPLACE = "assetbundle.hot_replace";
+        /// <summary>轮询 assetbundle.hot_replace 进度与每类计数。</summary>
+        public const string ASSETBUNDLE_HOT_REPLACE_STATUS = "assetbundle.hot_replace_status";
+        /// <summary>卸载所有已部署 AssetBundle（会断开实例化对象引用，用于迭代间隙重置）。</summary>
+        public const string ASSETBUNDLE_UNLOAD_ALL = "assetbundle.unload_all";
+        /// <summary>回滚指定 assetbundle.hot_replace 操作（需要原调用时带上 saveBackup:true）。</summary>
+        public const string ASSETBUNDLE_ROLLBACK = "assetbundle.rollback";
+
         // ── 编辑器工具（Editor only） ──
         /// <summary>触发 Unity 脚本重新编译。</summary>
         public const string REQUEST_COMPILE = "editor.request_compile";

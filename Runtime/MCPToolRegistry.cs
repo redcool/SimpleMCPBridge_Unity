@@ -21,7 +21,7 @@ namespace SimpleMCPBridge.Runtime
         /// <summary>
         /// Register a single static [MCPTool] method.
         /// </summary>
-        private void RegisterMethod(MethodInfo method, string name, string description, MCPToolPlatforms platform)
+        private void RegisterMethod(MethodInfo method, string name, string description, MCPToolPlatforms platform, bool requirePlayMode)
         {
             // Validate: (string) -> string
             var parameters = method.GetParameters();
@@ -49,6 +49,13 @@ namespace SimpleMCPBridge.Runtime
                 }
             }
 
+            // Play Mode filter: skip tools that require play mode when not playing
+            if (requirePlayMode && !UnityEngine.Application.isPlaying)
+            {
+                DebugUtils.Log($"[MCPToolRegistry] Skipping '{name}' — requires Play Mode.");
+                return;
+            }
+
             if (_tools.ContainsKey(name))
             {
                 DebugUtils.LogWarning(
@@ -58,7 +65,7 @@ namespace SimpleMCPBridge.Runtime
 
             var del = (Func<string, string>)method.CreateDelegate(typeof(Func<string, string>));
 
-            _tools[name] = new ToolEntry(name, description, del);
+            _tools[name] = new ToolEntry(name, description, del, requirePlayMode);
             DebugUtils.Log($"[MCPToolRegistry] Registered '{method.DeclaringType?.Name}.{method.Name}' as '{name}'");
         }
 
@@ -116,7 +123,7 @@ namespace SimpleMCPBridge.Runtime
                     {
                         var attr = method.GetCustomAttribute<MCPToolAttribute>();
                         if (attr == null) continue;
-                        RegisterMethod(method, attr.Name, attr.Description, attr.Platform);
+                        RegisterMethod(method, attr.Name, attr.Description, attr.Platform, attr.RequirePlayMode);
                     }
                 }
             }
@@ -135,6 +142,11 @@ namespace SimpleMCPBridge.Runtime
         {
             if (!_tools.TryGetValue(name, out var entry))
                 throw new NotImplementedException($"Unknown method: {name}");
+
+            // Runtime guard: reject PlayMode-only tools if not playing.
+            // Belt-and-suspenders for cases where re-registration hasn't run yet.
+            if (entry.RequirePlayMode && !UnityEngine.Application.isPlaying)
+                return "{\"success\":false,\"error\":\"Tool requires Play Mode\"}";
 
             // Direct delegate call — orders of magnitude faster than MethodInfo.Invoke
             return entry.Delegate(paramsJson ?? "{}");
@@ -160,12 +172,14 @@ namespace SimpleMCPBridge.Runtime
             public string Name { get; }
             public string Description { get; }
             public Func<string, string> Delegate { get; }
+            public bool RequirePlayMode { get; }
 
-            public ToolEntry(string name, string description, Func<string, string> del)
+            public ToolEntry(string name, string description, Func<string, string> del, bool requirePlayMode)
             {
                 Name = name;
                 Description = description;
                 Delegate = del;
+                RequirePlayMode = requirePlayMode;
             }
 
             public string ToJson()

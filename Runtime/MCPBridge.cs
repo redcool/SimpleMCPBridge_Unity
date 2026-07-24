@@ -245,9 +245,13 @@ namespace SimpleMCPBridge.Runtime
             if (status == null) return;
             _bridge?.SendIfConnected($"{{\"type\":\"playmode\",\"status\":\"{status}\"}}");
 
-            // Bridge disconnect is NOT done here — it would close the WebSocket
-            // before the ExitPlayMode JSON-RPC response can be sent.
-            // DomainUnload (during domain reload) handles cleanup.
+            // Re-register tools when entering/exiting Play Mode so the tool list
+            // reflects RequirePlayMode filtering (tools that only exist in Play Mode).
+            if (state == PlayModeStateChange.EnteredEditMode ||
+                state == PlayModeStateChange.EnteredPlayMode)
+            {
+                _bridge?.ReRegisterTools();
+            }
         }
 #endif
 

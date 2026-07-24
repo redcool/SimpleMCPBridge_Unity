@@ -348,6 +348,13 @@ namespace SimpleMCPBridge.Runtime.Handlers
             {
                 if (!prop.CanRead) continue;
                 if (prop.GetIndexParameters().Length > 0) continue;
+
+                // Skip properties whose getter clones objects (side-effects leak memory in edit mode).
+                // Specifically: Renderer.material clones the sharedMaterial, creating leaked instances.
+                if (typeof(Renderer).IsAssignableFrom(component.GetType()) &&
+                    prop.Name == "material" && prop.PropertyType == typeof(Material))
+                    continue;
+
                 string valStr;
                 try
                 {

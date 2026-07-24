@@ -51,7 +51,14 @@ namespace SimpleMCPBridge.Runtime
         private static BridgeClient _default;
         public static BridgeClient Default
         {
-            get { lock (_defaultLock) { return _default; } }
+            get
+            {
+                if (_default != null) return _default;
+                lock (_defaultLock)
+                {
+                    return _default ??= new BridgeClient();
+                }
+            }
             set { lock (_defaultLock) { _default = value; } }
         }
 
@@ -146,6 +153,20 @@ namespace SimpleMCPBridge.Runtime
             // _router is created once in constructor — do NOT null it
 
             while (_mainThreadQueue.TryDequeue(out _)) { }
+        }
+
+        /// <summary>
+        /// Re-create the MessageRouter (re-runs AutoRegisterAll with the current
+        /// Application.isPlaying state) and push the updated tool list to the server.
+        /// Called on Play Mode transitions so RequirePlayMode tools appear/disappear.
+        /// </summary>
+        public void ReRegisterTools()
+        {
+            _router = new MessageRouter();
+            var toolsJson = _router.GetToolsJson();
+            var registerMsg = $"{{\"type\":\"register_tools\",\"tools\":{toolsJson},\"bridgeId\":\"{BridgeId}\"}}";
+            SendIfConnected(registerMsg);
+            Log($"ReRegisterTools: pushed {toolsJson.Length} chars");
         }
 
         /// <summary>

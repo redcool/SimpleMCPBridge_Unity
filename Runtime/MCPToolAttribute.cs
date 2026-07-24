@@ -39,6 +39,12 @@ namespace SimpleMCPBridge.Runtime
         public string Name { get; }
         public string Description { get; }
         public MCPToolPlatforms Platform { get; set; } = MCPToolPlatforms.All;
+        /// <summary>
+        /// When true, this tool is only registered when the Application is playing
+        /// (Play Mode in Editor, or running in a built player).
+        /// Prevents edit-mode-only tools from being registered during editor usage.
+        /// </summary>
+        public bool RequirePlayMode { get; set; } = false;
 
         public MCPToolAttribute(string name, string description)
         {

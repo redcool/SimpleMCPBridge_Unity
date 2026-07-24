@@ -28,7 +28,7 @@ Data flow: Agent (stdio) → MCP Server → WebSocket → Unity Bridge → Unity
 **Unity Bridge:**
 - Open via `Tools > SimpleMCPBridge`
 - IP/Port fields, Connect button, GUID display, error panel
-- `AutoStartBridge.cs` ([InitializeOnLoad]) auto-connects on domain reload
+- Auto-connects on domain reload via [InitializeOnLoad]
 
 ## Port Conflicts (Common)
 
@@ -54,7 +54,7 @@ server keeps only the most recent one.
 - **Server stderr:** `SimpleMcpServer/server.err`
 - **Unity Editor log:** `$env:LOCALAPPDATA\Unity\Editor\Editor.log`
 
-## Tools (80)
+## Tools (88)
 
 | Tool | What it does | Platform |
 |------|-------------|----------|
@@ -142,6 +142,13 @@ server keeps only the most recent one.
 | `recording.stop` | Stop recording and finalize MP4 (async, poll status) | Android |
 | `recording.status` | Get current recording/export state | Android |
 | `recording.reset` | Force-reset recording system (recover from stuck state) | Android |
+| `shader.hot_replace` | Runtime hot-swap a Shader from an AB (WebClient download), global or per-path with instance materials | PlayMode |
+| `shader.hot_replace_status` | Poll shader.hot_replace progress | PlayMode |
+| `assetbundle.build_bundle` | Build an AssetBundle from project assets (Editor only, uses BuildPipeline) | Editor |
+| `assetbundle.hot_replace` | Download AB and auto-deploy assets by type (Shader/Material/Texture/AudioClip/Mesh/ScriptableObject/Prefab). Async with polling. Supports saveBackup, dryRun, rollback | PlayMode |
+| `assetbundle.hot_replace_status` | Poll hot_replace progress (per-type counts, instanceIds, errors) | PlayMode |
+| `assetbundle.rollback` | Rollback a previous hot_replace (requires saveBackup:true) | PlayMode |
+| `assetbundle.unload_all` | Unload ALL deployed AssetBundles (breaks references) | PlayMode |
 
 Tools are auto-discovered via `AutoRegisterAll()` — just create a class with
 `[MCPTool]` methods and it's picked up automatically.
@@ -164,11 +171,11 @@ Bridge → Server: {"type":"register_tools","tools":[...],"bridgeId":"..."}
 
 This avoids the race condition where bridge connects but tools aren't registered.
 
-## BridgeId per Window Open
+## BridgeId per Connection
 
-`MCPBridgeWindow.OnEnable()` generates a new GUID. This GUID is set on the
-bridge via `_bridge.BridgeId = _bridgeId`. Each window open → new ID. Both
-the server and the window UI display it for multi-bridge tracking.
+The bridge ID is generated in the `MCPBridge.BridgeId` property. Each
+connection gets a unique ID. Both the server and the window UI display it
+for multi-bridge tracking.
 
 ## WebSocket Impl (Unity Side)
 
@@ -182,7 +189,7 @@ Bridge receives messages on a background thread, queues them in a
 `ConcurrentQueue<Action>`, and drains on the Unity main thread:
 - **Edit Mode:** `EditorApplication.update` event
 - **Play Mode:** `MonoBehaviour.Update()`
-- `MCPBridgeWindow.OnEditorUpdate()` ticks `_bridge.DrainQueue()`
+- `MCPBridgeEditor.OnEditorUpdate()` ticks `_bridge.DrainQueue()`
 
 ## Testing
 
@@ -243,10 +250,31 @@ compilation error — check `editor.get_console` for details.
 | `Runtime/Handlers/BatchHandler.cs` | Batch dispatch (game.batch) |
 | `Runtime/MCPToolAttribute.cs` | MCPTool + MCPToolClass attrs + MCPToolPlatforms enum |
 | `Runtime/MCPToolRegistry.cs` | Auto-discovery + registration + platform filter |
-| `Editor/MCPBridgeWindow.cs` | Tools > SimpleMCPBridge window |
-| `Editor/AutoStartBridge.cs` | Auto-connect on domain reload |
+| `Editor/MCPBridgeEditor.cs` | Custom Editor for MCPBridge Inspector |
+| `Runtime/Handlers/AssetBundleHotReplaceHandler.cs` | General AB hot-deploy (+ rollback) |
+| `Runtime/Handlers/ShaderHotReplaceHandler.cs` | Shader-only hot-swap |
+| `Runtime/Handlers/AssetHandler.cs` | Asset tools (find, refresh, build_bundle) |
 | `Plugins/` | NuGet DLL 依赖（InstantReplay/UniEnc 需要，已含在仓库内）|
 | `bridge-config.json` | Bridge IP/port |
+
+## AssetBundle Lifecycle
+
+The hot-replace system manages AssetBundles through a centralized lifecycle:
+
+- `_loadedBundles` is a `Dictionary<string, AssetBundle>` keyed by `abUrl`
+- `LoadBundle` unloads any old bundle with the same URL before loading a new one
+- If loading fails (possible duplicate content), `UnloadAllLoadedBundles` is called as fallback
+- Hot-replace tools require Play Mode — use `RequirePlayMode = true` on the attribute
+
+## MCPToolAttribute — RequirePlayMode
+
+The `MCPToolAttribute` supports a `RequirePlayMode` property:
+
+```csharp
+[MCPTool("assetbundle.hot_replace", "...", RequirePlayMode = true)]
+```
+
+When `RequirePlayMode = true`, the tool is only registered when the Unity application is playing (Play Mode in Editor, or any built player). This prevents tools that modify scene objects from being called in Edit Mode.
 
 ## Input Tool Parameter Reference
 
@@ -295,7 +323,7 @@ compilation error — check `editor.get_console` for details.
 服务器支持多个 bridge 同时连接（如 Editor + Android）。
 
 - 路由规则: **last-registration-wins** — 后连接的 bridge 覆盖同名工具的前一个注册
-- Editor bridge (80 tools) 先连接 → Android bridge (35 tools) 后连接 → Android 覆盖重叠工具
+- Editor bridge (88 tools) 先连接 → Android bridge (35 tools) 后连接 → Android 覆盖重叠工具
 - 两个 bridge 都有 `scene.set_transform` → 调用路由到 **Android**（后注册者）
 - 录屏工具 (`recording.*`) 只在 Android bridge 注册（`Platform = Android | iOS | Standalone`）
 - 验证路由目标: `scene.get_hierarchy` 返回 flat array `[...]` = Android; 返回 `{"value":[...],"Count":N}` = Editor

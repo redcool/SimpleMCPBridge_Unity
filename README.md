@@ -74,11 +74,11 @@ Assets/
 │   │   ├── WebSocketInterfaces.cs   # WebSocket 接口抽象
 │   │   ├── Config/
 │   │   │   └── BridgeConfig.cs      # 配置加载（Editor/Player）
-│   │   ├── Handlers/       # 工具处理器（12 个 Handler，80 个工具）
+│   │   ├── Handlers/       # 工具处理器（15+ Handler，88+ 个工具）
 │   │   ├── Tools/          # 工具辅助类
 │   │   └── Models/
 │   ├── Editor/
-│   │   └── MCPBridgeWindow.cs       # Tools > SimpleMCPBridge 窗口
+│   │   └── MCPBridgeEditor.cs       # Tools > SimpleMCPBridge 窗口
 │   ├── Plugins/             # 依赖 DLL（已含仓库内，clone 即可用）
 │   ├── bridge-config.json   # IP/Port/加密配置
 │   └── SimpleMCPBridge.asmdef  # 程序集定义（含 versionDefines）
@@ -176,7 +176,7 @@ Bridge 生命周期独立于窗口：关闭窗口后 bridge 继续运行，进�
 
 解析优先级：`instanceId` > `path`。两个都传时先试 instanceId，找不到再 fallback 路径。
 
-## 可用工具（共 80 个）
+## 可用工具（共 88+ 个）
 
 ### 场景工具（SceneHandler，17 All + 9 Editor = 26 工具）
 
@@ -359,6 +359,19 @@ Quality → Bitrate 映射：
 | `nav.has_navmesh` | — | 检查 NavMesh 是否存在。返回：hasNavMesh(bool)、vertexCount、triangleCount |
 | `nav.move_to` | `instanceId`/`path`(必填), `destination`[3](必填), `speed`(可选), `stopDistance`(可选) | 设置 NavMeshAgent 目标点，自动寻路移动。返回 agent 状态（pathPending、remainingDistance、isStopped、velocity） |
 
+### 资源热替换工具（AssetBundleHotReplaceHandler + ShaderHotReplaceHandler，6 工具）
+
+这些工具使用 `RequirePlayMode = true`，仅当 Play Mode 激活时才注册。
+
+| 工具 | 平台 | 参数 | 说明 |
+|------|------|------|------|
+| `shader.hot_replace` | PlayMode | `abUrl`(必填), `shaderName`(必填), `paths`[](可选), `oldShaderName`(可选), `materialIndex`(可选) | 从 AssetBundle 热替换 Shader。异步，返回 replaceId，轮询 shader.hot_replace_status |
+| `shader.hot_replace_status` | PlayMode | `id`(必填) | 查询 shader.hot_replace 进度 |
+| `assetbundle.hot_replace` | PlayMode | `abUrl`(必填), `types`[](可选), `paths`[](可选), `oldShaderName`(可选), `saveBackup`(可选), `dryRun`(可选) | 通用 AssetBundle 热部署。自动分发 Shader/Material/Texture/AudioClip/Mesh/ScriptableObject/Prefab。异步，轮询 status |
+| `assetbundle.hot_replace_status` | PlayMode | `id`(必填) | 查询替换进度（各类型计数） |
+| `assetbundle.rollback` | PlayMode | `id`(必填) | 回滚一次带 saveBackup 的替换操作 |
+| `assetbundle.unload_all` | PlayMode | — | 卸载所有已加载的 AB（⚠ 会破坏引用，材质变粉） |
+
 由 SimpleMcpServer 直接提供，不在 Bridge 注册：
 
 | 工具 | 参数 | 说明 |
@@ -371,7 +384,7 @@ Quality → Bitrate 映射：
 多个 Unity Bridge 可同时连接：
 
 - **路由规则**：`last-registration-wins` — 后连接的 bridge 覆盖同名工具
-- Editor bridge（80 tools）与 Android bridge（部分工具）共存
+- Editor bridge（88+ tools）与 Android bridge（部分工具）共存
 - **Bridge 断线**：该 bridge 的工具从路由表移除；有其他 bridge 注册同工具时自动回退
 - 无 bridge 时待处理调用进入重试队列（30s 宽限期）
 - 使用 `bridge.list` 查看所有已连接 bridge
@@ -400,7 +413,8 @@ using static SimpleMCPBridge.Runtime.Handlers.HandlerUtils;
 public class MyTools
 {
     [MCPTool("my_tool_name", "工具描述",
-             Platform = MCPToolPlatforms.Android | MCPToolPlatforms.Editor)]
+             Platform = MCPToolPlatforms.All,
+             RequirePlayMode = true)]
     public static string MyTool(string paramsJson)
     {
         var args = ParseJsonObject(paramsJson);
@@ -410,6 +424,8 @@ public class MyTools
 }
 ```
 
+`RequirePlayMode = true` 时该工具仅当应用处于播放模式时注册，避免 Editor Edit Mode 下误调用。
+
 2. **自动注册** — `MessageRouter` 构造时扫描程序集，自动发现带 `[MCPTool]` 的方法。
 
 ### 规则
@@ -418,6 +434,7 @@ public class MyTools
 - 类需要 **public 无参构造函数**（static class 自动跳过）
 - `[MCPToolClass]` 标记类可加速发现
 - `Platform` 可选，控制哪些构建目标注册该工具
+- `RequirePlayMode` 可选，为 `true` 时工具仅在 Play Mode 时注册
 - 修改 C# 后等待 Unity 编译完成
 
 ### HandlerUtils 静态工具类
@@ -482,6 +499,10 @@ Get-Process -Name "node" | Stop-Process -Force
 ### 4. 多窗口 Unity 多 bridge
 
 开启多个 Unity 进程（如多个 Editor 窗口）时各自建立独立 WebSocket 连接，每个进程一个 bridgeId。
+
+### 6. `RequirePlayMode` 注册时机
+
+`MCPToolRegistry` 在 `BridgeClient` 构造时扫描注册工具。由于 `BridgeClient` 是单例，工具注册只发生一次。进出 Play Mode 时如果 bridge 未断开，工具列表不会动态更新。但在标准工作流中（domain reload → bridge 重连），每次进入/退出 Play Mode 都会重新注册。
 
 ## 相关仓库
 
