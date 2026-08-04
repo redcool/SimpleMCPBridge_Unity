@@ -27,7 +27,7 @@
   - 已删除包根遗留 `bridge-config.json`(运行时不再读)
 - [x] 2026-08 **移除 PowerUtilities 死引用** — 全仓 grep 仅 2 处注释提及(零代码使用),asmdef `references` 移除 `"PowerUtilities"`(SimpleMCPBridge.asmdef:5),实现真正独立;编译通过证明零依赖
 - [x] 2026-08 **UPM 化调研结论** — 单 asmdef + `#if UNITY_EDITOR`(46 处)合法(UPM 不强制 Editor/Runtime 拆分 asmdef);「只加 package.json」不够,必须通过 manifest.json `file:` 引用才生效
-- [x] 2026-08 **AGENTS.md NGUI 安装方式 A 更新** — NGUI 仓库新增 `upm_template/` 目录(3 个文件:NGUI.asmdef_temp / NGUI.Editor.asmdef_temp / package.json + readme.txt),方式 A 改为「现成模板三步」:拷贝 2 个 asmdef_temp(改名去 _temp)+ package.json 到仓库根,排除 Examples~,manifest 加 file: 引用;模板不可用时保留手写方式
+- [x] 2026-08 **AGENTS.md NGUI 安装指向 UPM fork** — 方式 A 首选改为直接引用 fork 库 `https://github.com/redcool/ngui-upm.git`(已含 asmdef + package.json),manifest 加 git URL 或本地 clone 后 file: 引用;旧模板方式(upm_template/ 三步拷贝)降级为「针对未 UPM 化 tasharen/ngui 仓库」的备选;SimpleMCPBridge 只负责 NGUI_ON 检测入口(versionDefines + references + #if NGUI_ON 代码),不管 NGUI 包本体
 - [x] 2026-08 **NGUI 工具集集成** — `ngui.get_texts` / `ngui.find` / `ngui.find_widgets`(Ngui 类别 count=3)
   - 根因:asmdef `references` 缺 `"NGUI"`(versionDefines 只定义符号不加引用)→ 已修复
   - 验证:工具注册正常、扫描 UITexture+UILabel、滤镜工作;0 Error

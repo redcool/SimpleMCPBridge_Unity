@@ -195,18 +195,30 @@ TMP 缺失时（`#else`）这些入口返回 `null`，相关扫描/操作静默�
 
 ### NGUI 安装
 
-NGUI 源码仓库（`tasharen/ngui`）**没有 package.json / asmdef**，不能直接用 versionDefines 检测。
+原版 `tasharen/ngui` **没有 package.json / asmdef**,不能直接用 versionDefines 检测。
+**已提供 UPM 化 fork：`https://github.com/redcool/ngui-upm.git`**（已含 asmdef + package.json，推荐直接使用）。
 两种安装方式，任选其一：
 
-#### 方式 A：包化成 UPM 包（推荐，versionDefines 自动生效）
+#### 方式 A：UPM 包（推荐，versionDefines 自动生效）
 
-**使用现成模板（推荐）**：NGUI 仓库已含 `upm_template/` 目录（agent 可直接指导用户操作），按 `upm_template/readme.txt` 三步完成：
+**直接引用 UPM 化 fork（最简）**：
+
+```json
+// Packages/manifest.json
+"com.tasharen.ngui": "https://github.com/redcool/ngui-upm.git"
+```
+
+- 仓库已含 `package.json`（`com.tasharen.ngui` v3.12.0）与两个 asmdef（`NGUI.asmdef` 运行时 + `NGUI.Editor.asmdef` Editor）
+- `NGUI_ON` 由 asmdef `versionDefines` **自动**定义，零手动步骤
+- 本地调试可先 `git clone https://github.com/redcool/ngui-upm.git <目录>`，再改用 `"com.tasharen.ngui": "file:../../ngui-upm"`
+
+**旧模板方式（针对未 UPM 化的 tasharen/ngui 仓库）**：原仓库含 `upm_template/` 目录，按 `readme.txt` 三步完成：
 
 1. `git clone https://github.com/tasharen/ngui.git <某目录>`（如 `H:\ai_works\ngui`）
-2. 从 `upm_template/` 拷贝并按 `readme.txt` 放置：
-   - `NGUI.asmdef_temp` → `Assets/NGUI/Scripts/NGUI.asmdef`（改名去掉 `_temp`）
-   - `NGUI.Editor.asmdef_temp` → `Assets/NGUI/Scripts/Editor/NGUI.Editor.asmdef`（改名去掉 `_temp`）
-   - `package.json` → 仓库根（`com.tasharen.ngui` v3.12.0，含 UPM 化说明）
+2. 从 `upm_template/` 拷贝并改名放置：
+   - `NGUI.asmdef_temp` → `Assets/NGUI/Scripts/NGUI.asmdef`
+   - `NGUI.Editor.asmdef_temp` → `Assets/NGUI/Scripts/Editor/NGUI.Editor.asmdef`
+   - `package.json` → 仓库根
 3. 排除示例：`Assets/NGUI/Examples` → 改名 `Examples~`（Unity 不导入）
 4. 项目 `Packages/manifest.json` 加：`"com.tasharen.ngui": "file:../../ngui"`（相对路径按实际位置）
 
@@ -214,11 +226,6 @@ NGUI 源码仓库（`tasharen/ngui`）**没有 package.json / asmdef**，不能�
 - `NGUI.asmdef_temp` — 运行时程序集，名 `NGUI`，Any Platform，无引用
 - `NGUI.Editor.asmdef_temp` — Editor 程序集，`includePlatforms: ["Editor"]`，引用 `NGUI`
 - `package.json` — name `com.tasharen.ngui` / version `3.12.0` / unity `2019.4`
-
-**手动方式（模板不可用时）**：按同样结构手写——
-- `Assets/NGUI/Scripts/NGUI.asmdef` — 运行时，Any Platform，程序集名 `NGUI`
-- `Assets/NGUI/Scripts/Editor/NGUI.Editor.asmdef` — `includePlatforms: ["Editor"]`，引用 `NGUI`
-- 仓库根 `package.json`：`{"name": "com.tasharen.ngui", "version": "3.12.0", ...}`
 
 `NGUI_ON` 由 asmdef `versionDefines` **自动**定义，零手动步骤。
 
