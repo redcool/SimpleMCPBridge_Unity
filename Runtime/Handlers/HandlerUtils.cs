@@ -144,6 +144,15 @@ namespace SimpleMCPBridge.Runtime.Handlers
             return null;
         }
 
+        public static bool? GetOptionalBool(Dictionary<string, object> dict, string key)
+        {
+            if (!dict.TryGetValue(key, out var v) || v == null) return null;
+            if (v is bool b) return b;
+            var s = v?.ToString();
+            if (bool.TryParse(s, out var result)) return result;
+            return null;
+        }
+
         public static bool GetRequiredBool(Dictionary<string, object> dict, string key)
         {
             if (!dict.TryGetValue(key, out var v))

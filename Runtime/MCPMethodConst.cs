@@ -158,11 +158,19 @@ namespace SimpleMCPBridge.Runtime
         /// <summary>获取当前录制状态。</summary>
         public const string GET_RECORDING_STATUS = "recording.status";
 
-        // ── UI 分析工具 ──
-        /// <summary>获取场景中所有 UI 文本内容及屏幕坐标。</summary>
+        // ── UI 分析工具（uGUI）──
+        /// <summary>获取场景中所有 uGUI 文本内容及屏幕坐标。</summary>
         public const string UI_GET_TEXTS = "ui.get_texts";
-        /// <summary>查找场景中可交互的 UI 元素（Button/Toggle/Slider/Dropdown/InputField）。</summary>
+        /// <summary>查找场景中可交互的 uGUI 元素（Button/Toggle/Slider/Dropdown/InputField）。</summary>
         public const string UI_FIND = "ui.find";
+
+        // ── NGUI 分析工具（需安装 com.tasharen.ngui 才注册，独立于 ui.*）──
+        /// <summary>获取场景中所有 NGUI UILabel 文本内容及屏幕坐标。</summary>
+        public const string NGUI_GET_TEXTS = "ngui.get_texts";
+        /// <summary>查找场景中可交互的 NGUI 元素（UIButton/UIToggle/UISlider/UIInput）。</summary>
+        public const string NGUI_FIND = "ngui.find";
+        /// <summary>查找场景中所有 NGUI UIWidget（UITexture/UISprite/UILabel 等）及其屏幕坐标。</summary>
+        public const string NGUI_FIND_WIDGETS = "ngui.find_widgets";
 
         // ── 统一输入工具 ──
         /// <summary>统一输入：键盘、鼠标、滚轮、轴（Input System + Legacy Input）。</summary>
@@ -237,5 +245,10 @@ namespace SimpleMCPBridge.Runtime
         public const string GAME_GET_TIME_SCALE = "game.get_time_scale";
         /// <summary>设置 Time.timeScale（0=暂停, 1=正常, 2=2倍速）。</summary>
         public const string GAME_SET_TIME_SCALE = "game.set_time_scale";
+
+        public const string TOOLS_ENABLE = "tools.enable";
+        public const string TOOLS_DISABLE = "tools.disable";
+        public const string TOOLS_LIST_CATEGORIES = "tools.list_categories";
+        public const string TOOLS_RESET = "tools.reset";
     }
 }

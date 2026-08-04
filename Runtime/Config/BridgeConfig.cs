@@ -5,10 +5,10 @@ using UnityEngine;
 namespace SimpleMCPBridge
 {
     /// <summary>
-    /// bridge-config.json 加载策略：
-    ///   Editor → 从项目文件 Assets/SimpleMCPBridge/bridge-config.json 读取
+    /// bridge-config.json 加载策略（UPM 包友好）：
+    ///   Editor → 项目 Assets/SimpleMCPBridge-config/bridge-config.json（可写，首次自动从 Resources 拷贝）
     ///   Player → 首次启动从 Resources 拷贝到 persistentDataPath，之后从 persistentDataPath 读取
-    ///   如果目标文件不存在，回退到 Resources 内嵌默认值。
+    ///   都不存在时回退到 Resources 内嵌默认值。
     ///
     /// 用户修改配置后需重启 App 生效。
     /// </summary>
@@ -16,6 +16,7 @@ namespace SimpleMCPBridge
     {
         private const string CONFIG_FILE = "bridge-config.json";
         private const string RESOURCE_NAME = "bridge-config";
+        private const string EDITOR_CONFIG_DIR = "SimpleMCPBridge-config";
 
         [System.Serializable]
         public class ConfigData
@@ -29,13 +30,12 @@ namespace SimpleMCPBridge
         public static string EncryptionKey { get; private set; } = "";
 
         /// <summary>
-        /// 启动时调用：确保 Player 设备上有可写的配置文件副本。
-        /// Editor 下不做任何操作（直接读项目文件）。
+        /// 启动时调用：确保目标位置存在可写的配置文件副本（不存在则从 Resources 拷贝默认值）。
+        /// 已存在则**不覆盖**（用户修改过的配置保持原样）。
         /// </summary>
         public static void EnsureConfigOnDevice()
         {
-#if !UNITY_EDITOR
-            string path = GetPersistentPath();
+            string path = GetTargetPath();
 
             var textAsset = Resources.Load<TextAsset>(RESOURCE_NAME);
             if (textAsset == null)
@@ -44,30 +44,28 @@ namespace SimpleMCPBridge
                 return;
             }
 
-            Directory.CreateDirectory(Application.persistentDataPath);
-
-            // Overwrite if content changed (e.g. useTls was added in a new build)
             if (File.Exists(path))
-            {
-                var existing = File.ReadAllText(path);
-                if (existing.Trim() == textAsset.text.Trim())
-                    return;
-                File.WriteAllText(path, textAsset.text);
-                DebugUtils.Log("[BridgeConfig] Updated config (content changed)");
-            }
-            else
-            {
-                File.WriteAllText(path, textAsset.text);
-                DebugUtils.Log($"[BridgeConfig] Copied default config to {path}");
-            }
+                return;
+
+            var dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir))
+                Directory.CreateDirectory(dir);
+
+            File.WriteAllText(path, textAsset.text);
+            DebugUtils.Log($"[BridgeConfig] Created default config at {path}");
+
+#if UNITY_EDITOR
+            // 让新建的文件/目录在 Project 窗口可见（Play Mode 下跳过，避免导入抖动）
+            if (!Application.isPlaying)
+                UnityEditor.AssetDatabase.Refresh();
 #endif
         }
 
         /// <summary>
         /// 读取配置。
-        ///   Editor → 从项目文件 Assets/SimpleMCPBridge/bridge-config.json 读取
+        ///   Editor → 项目 Assets/SimpleMCPBridge-config/bridge-config.json
         ///   Player → Application.persistentDataPath/bridge-config.json
-        /// 都不存在时回退到 Resources。
+        /// 不存在时回退到 Resources。
         /// </summary>
         public static bool LoadConfig(out string ip, out int port)
         {
@@ -76,17 +74,9 @@ namespace SimpleMCPBridge
 
             string json = null;
 
-#if UNITY_EDITOR
-            // Editor: 读取项目 Assets/SimpleMCPBridge/bridge-config.json
-            string editorPath = Path.Combine(Application.dataPath, "SimpleMCPBridge", CONFIG_FILE);
-            if (File.Exists(editorPath))
-                json = File.ReadAllText(editorPath);
-#else
-            // Player: 从 persistentDataPath 读取（EnsureConfigOnDevice 已保证存在）
-            string persistentPath = GetPersistentPath();
-            if (File.Exists(persistentPath))
-                json = File.ReadAllText(persistentPath);
-#endif
+            string targetPath = GetTargetPath();
+            if (File.Exists(targetPath))
+                json = File.ReadAllText(targetPath);
 
             // 回退到 Resources 内嵌默认值
             if (string.IsNullOrEmpty(json))
@@ -115,6 +105,15 @@ namespace SimpleMCPBridge
             }
         }
 
+        /// <summary>目标配置文件路径：Editor 在项目 Assets 下，Player 在 persistentDataPath。</summary>
+        private static string GetTargetPath()
+        {
+#if UNITY_EDITOR
+            return Path.Combine(Application.dataPath, EDITOR_CONFIG_DIR, CONFIG_FILE);
+#else
+            return GetPersistentPath();
+#endif
+        }
 
         private static string GetPersistentPath()
         {

@@ -2,10 +2,11 @@
     "name": "SimpleMCPBridge",
     "rootNamespace": "",
     "references": [
-        "PowerUtilities",
         "Unity.InputSystem",
         "InstantReplay",
-        "UniEnc"
+        "UniEnc",
+        "NGUI",
+        "Unity.TextMeshPro"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
@@ -24,6 +25,16 @@
             "name": "jp.co.cyberagent.instant-replay",
             "expression": "",
             "define": "INSTANT_REPLAY_ON"
+        },
+        {
+            "name": "com.tasharen.ngui",
+            "expression": "",
+            "define": "NGUI_ON"
+        },
+        {
+            "name": "com.unity.textmeshpro",
+            "expression": "",
+            "define": "TEXT_MESH_PRO_ON"
         }
     ],
     "noEngineReferences": false

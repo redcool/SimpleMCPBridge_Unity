@@ -45,7 +45,10 @@ server keeps only the most recent one.
 ## Config
 
 - **Server:** `SimpleMcpServer/config.json` — `{ "ip": "127.0.0.1", "port": 45678 }`
-- **Bridge:** `Assets/SimpleMCPBridge/bridge-config.json` — `{ "serverIp": "...", "serverPort": 45678 }`
+- **Bridge (Editor):** 项目 `Assets/SimpleMCPBridge-config/bridge-config.json` — 首次自动从包内
+  `Resources/bridge-config.json` 拷贝生成（不存在时创建，已存在则不覆盖）；用户可改，重启生效
+- **Bridge (Player):** `Application.persistentDataPath/bridge-config.json` — 同上逻辑
+- 兜底: 包内 `Runtime/Resources/bridge-config.json` 内嵌默认值
 - Both use the same format. Cloud deployment: server `ip: "0.0.0.0"`.
 
 ## Logs
@@ -54,7 +57,7 @@ server keeps only the most recent one.
 - **Server stderr:** `SimpleMcpServer/server.err`
 - **Unity Editor log:** `$env:LOCALAPPDATA\Unity\Editor\Editor.log`
 
-## Tools (88)
+## Tools (95)
 
 | Tool | What it does | Platform |
 |------|-------------|----------|
@@ -118,6 +121,9 @@ server keeps only the most recent one.
 | `input.action` | Unified input: keys + mouse + axes + scroll in one call | All |
 | `ui.get_texts` | Read on-screen UI text from memory (no OCR) — Text + TMP | All |
 | `ui.find` | Find interactive UI elements with screen positions + state | All |
+| `ngui.get_texts` ⚠ | Read NGUI UILabel text from memory (no OCR) — requires NGUI package | All |
+| `ngui.find` ⚠ | Find interactive NGUI elements (UIButton/UIToggle/UISlider/UIInput) + state | All |
+| `ngui.find_widgets` ⚠ | Find all NGUI UIWidget (UITexture/UISprite/UILabel/...) + screen rect | All |
 | `ui.set_input_field_text` | Set InputField/TMP_InputField text directly | All |
 | `ui.set_toggle` | Set Toggle on/off | All |
 | `ui.set_slider` | Set Slider value (normalized 0-1 maps to minValue-maxValue) | All |
@@ -131,7 +137,7 @@ server keeps only the most recent one.
 | `game.get_time_scale` | Get current Time.timeScale and fixedDeltaTime | All |
 | `game.get_spatial` | Nearby 3D objects within radius from origin/player (name, pos, distance, direction, components) | All |
 | `game.watch` | Register property signals for change monitoring (baseline at registration) | All |
-| `game.get_delta` | Poll watched signals — returns only changed values since last call | All |
+| `game.get_delta` | Read cached signal changes (bridge polls every ~167ms/10 frames; read-and-clear) | All |
 | `game.do_sequence` | Execute predefined action sequence (key/mouse/gamepad/click/wait) on Unity side | All |
 | `game.sequence_status` | Poll sequence execution status | All |
 | `game.set_time_scale` | Set Time.timeScale (0=pause, 1=normal, 2=2x speed) | All |
@@ -149,9 +155,78 @@ server keeps only the most recent one.
 | `assetbundle.hot_replace_status` | Poll hot_replace progress (per-type counts, instanceIds, errors) | PlayMode |
 | `assetbundle.rollback` | Rollback a previous hot_replace (requires saveBackup:true) | PlayMode |
 | `assetbundle.unload_all` | Unload ALL deployed AssetBundles (breaks references) | PlayMode |
+| `tools.list_categories` | List all tool categories with tool counts + enabled state | All |
+| `tools.enable` | Enable tool categories (`categories` string[] or `all`=true) — re-registers + pushes tool list | All |
+| `tools.disable` | Disable tool categories (`categories` string[] or `all`=true) — removes tools from registration | All |
+| `tools.reset` | Re-enable every category (full tool list restored) | All |
 
 Tools are auto-discovered via `AutoRegisterAll()` — just create a class with
 `[MCPTool]` methods and it's picked up automatically.
+
+## Tool Categories & Dynamic Registration
+
+- Every tool gets a category derived from its name prefix (`scene.get_hierarchy` → `Scene`,
+  `assetbundle.hot_replace` → `AssetBundle`). Override via `[MCPTool(..., Category = "X")]`.
+- Tool descriptions are prefixed with `[Category]` (e.g. `[Scene] Get the full scene hierarchy...`)
+  so agents can scan/group tools quickly.
+- `tools.enable` / `tools.disable` / `tools.reset` change which categories are registered
+  and immediately push the new tool list to the server (via `ReRegisterTools`).
+- Category state is **static** — it survives Play Mode transitions and router rebuilds.
+- `tools.disable all` keeps only the `Tools` category alive, so the control tools are always available.
+- `tools.list_categories` shows all categories ever scanned (including currently-disabled ones)
+  with `count` and `enabled` flags.
+
+### uGUI 与 NGUI 是独立工具集
+
+- `ui.*`（uGUI: Canvas/Text/TMP）→ 类别 `Ui`；`ngui.*`（NGUI: UILabel/UIButton）→ 类别 `Ngui`。
+- 两者**互不互斥**：可同时开启，也可 `tools.disable ["Ui"]` 只留 NGUI（或反之）。
+- NGUI 工具用 `#if NGUI_ON` 条件编译 —— 项目未装 NGUI 时不注册 `ngui.*`，不影响编译。
+
+### TMP 条件编译（TEXT_MESH_PRO_ON）
+
+`SimpleMCPBridge.asmdef` 的 versionDefines 含 `com.unity.textmeshpro` → `TEXT_MESH_PRO_ON`，
+references 含软引用 `"Unity.TextMeshPro"`。TMP 存在时：
+- `UIAnalysisTools.TMPTextType` / `GameHandler.GetTMPInputFieldType()` / `GetTMPDropdownType()`
+  返回**编译期类型**（`typeof(TMPro.X)`），替代原先 `Type.GetType("TMPro.X, Unity.TextMeshPro")`
+  字符串反射（程序集名写死、易碎）。
+- 下游反射属性读取（`GetProperty("text")` 等）保持不变，只换类型解析入口。
+
+TMP 缺失时（`#else`）这些入口返回 `null`，相关扫描/操作静默跳过——行为与原来一致。
+
+### NGUI 安装
+
+NGUI 源码仓库（`tasharen/ngui`）**没有 package.json / asmdef**，不能直接用 versionDefines 检测。
+两种安装方式，任选其一：
+
+#### 方式 A：包化成 UPM 包（推荐，versionDefines 自动生效）
+
+1. `git clone https://github.com/tasharen/ngui.git <某目录>`（如 `H:\ai_works\ngui`）
+2. 仓库根补 `package.json`：`{"name": "com.tasharen.ngui", "version": "3.12.0", ...}`
+3. 建 asmdef（本仓库已按此结构验证）：
+   - `Assets/NGUI/Scripts/NGUI.asmdef` — 运行时，Any Platform，程序集名 `NGUI`
+   - `Assets/NGUI/Scripts/Editor/NGUI.Editor.asmdef` — `includePlatforms: ["Editor"]`，引用 `NGUI`
+4. 排除示例：`Assets/NGUI/Examples` → 改名 `Examples~`（Unity 不导入）
+5. 项目 `Packages/manifest.json` 加：`"com.tasharen.ngui": "file:../../ngui"`（相对路径按实际位置）
+
+`NGUI_ON` 由 asmdef `versionDefines` **自动**定义，零手动步骤。
+
+#### 方式 B：源码直接放 Assets/（非 UPM）+ 手动定义 NGUI_ON
+
+1. NGUI 源码拷入项目 `Assets/NGUI/`
+2. 建与方式 A 相同的两个 asmdef（**必须建**，见下方警告）
+3. 排除示例：`Assets/NGUI/Examples` → 改名 `Examples~`
+4. **手动**加 `NGUI_ON` 符号：
+   - `Project Settings → Player → Other Settings → Scripting Define Symbols` 加 `NGUI_ON`
+   - 或 `SimpleMCPBridge.asmdef` 的 `defineConstraints` 加 `"NGUI_ON"`（仅本程序集编译条件）
+
+> ⚠️ **警告**：`#if NGUI_ON` 打开但 NGUI 类型不可解析会报 CS0246。NGUI 源码**必须**放在有 `NGUI.asmdef` 的程序集里
+> （asmdef 程序集无法引用裸放进 Assembly-CSharp 的 NGUI 代码），且 `SimpleMCPBridge.asmdef` 的
+> `references` 必须含 `"NGUI"`。方式 B 只省掉「package.json + manifest 引用」两步，其余前置条件不变。
+
+**SimpleMCPBridge.asmdef 的配套配置（两种方式都必须具备）**：
+- `versionDefines`：`com.tasharen.ngui` → `NGUI_ON`（方式 A 自动触发；方式 B 不触发，需手动符号）
+- `references`：加 `"NGUI"`（软引用 —— NGUI 缺失时仅 warning 不报错，装了才能解析类型）
+- 代码：`NguiHandler.cs` / `NGUIAnalysisTools.cs` 全部内容在 `#if NGUI_ON` 内
 
 ## Protocol: Tool Registration (request_tools)
 
@@ -179,9 +254,13 @@ for multi-bridge tracking.
 
 ## WebSocket Impl (Unity Side)
 
-- Zero external dependencies (raw `System.Net.Sockets` + `System.Security.Cryptography`)
-- RFC 6455: masked frames client→server, unmasked server→client
-- HTTP upgrade path must be `GET / HTTP/1.1` (not path-prefixed)
+- **Active transport:** `NetWebSocketClient` (wraps .NET's `ClientWebSocket`) — created in
+  `BridgeClient.ConnectToServer()`.
+- **Legacy:** `WebSocketClient` (raw `System.Net.Sockets` + `System.Security.Cryptography`,
+  custom RFC 6455) is marked `[Obsolete]` and kept as reference only — never instantiated
+  by the bridge. Do not use it in new code.
+- Protocol notes (apply to both): RFC 6455 masked frames client→server, unmasked
+  server→client; HTTP upgrade path must be `GET / HTTP/1.1` (not path-prefixed).
 
 ## Main-Thread Safety
 
@@ -233,11 +312,13 @@ compilation error — check `editor.get_console` for details.
 | Path | Description |
 |------|-------------|
 | `Runtime/MCPBridge.cs` | Bridge MonoBehaviour, connect/retry/disconnect, queue drain |
-| `Runtime/WebSocketClient.cs` | Raw TCP WS client, frame read/write, HTTP upgrade |
+| `Runtime/WebSocketClient.cs` | Legacy custom RFC 6455 client — `[Obsolete]`, reference only (use NetWebSocketClient) |
 | `Runtime/MessageRouter.cs` | Routes tool calls to handlers |
 | `Runtime/MCPToolRegistry.cs` | Scans for [MCPTool] methods |
 | `Runtime/Handlers/GameHandler.cs` | High-level game tools: ui.*, input.action, game.* |
+| `Runtime/Handlers/NguiHandler.cs` | NGUI tools: ngui.get_texts/find (#if NGUI_ON — requires com.tasharen.ngui) |
 | `Runtime/Tools/UIAnalysisTools.cs` | Canvas UI scanning (Text + TMP + interactive elements) |
+| `Runtime/Tools/NGUIAnalysisTools.cs` | NGUI scanning (UILabel text + UIButton/UIToggle/UISlider/UIInput) (#if NGUI_ON) |
 | `Runtime/Tools/InputActionTools.cs` | Virtual Gamepad + combined input (keys/mouse/axes) |
 | `Runtime/Handlers/SceneHandler.cs` | Scene inspection + manipulation tools |
 | `Runtime/Handlers/RecordingHandler.cs` | Gameplay recording tools (CyberAgent InstantReplay) |
@@ -248,6 +329,7 @@ compilation error — check `editor.get_console` for details.
 | `Runtime/Handlers/AudioHandler.cs` | Audio source inspection |
 | `Runtime/Handlers/NavHandler.cs` | NavMesh pathfinding + sampling |
 | `Runtime/Handlers/BatchHandler.cs` | Batch dispatch (game.batch) |
+| `Runtime/Handlers/ToolsHandler.cs` | Dynamic tool registration control (tools.enable/disable/list_categories/reset) |
 | `Runtime/MCPToolAttribute.cs` | MCPTool + MCPToolClass attrs + MCPToolPlatforms enum |
 | `Runtime/MCPToolRegistry.cs` | Auto-discovery + registration + platform filter |
 | `Editor/MCPBridgeEditor.cs` | Custom Editor for MCPBridge Inspector |
@@ -320,13 +402,23 @@ When `RequirePlayMode = true`, the tool is only registered when the Unity applic
 
 ## Multi-Bridge 路由
 
-服务器支持多个 bridge 同时连接（如 Editor + Android）。
+服务器支持多个 bridge 同时连接（如 Editor + Android）。三层机制：
 
-- 路由规则: **last-registration-wins** — 后连接的 bridge 覆盖同名工具的前一个注册
+1. **默认路由: last-registration-wins** — 后连接的 bridge 覆盖同名工具的前一个注册
+2. **显式路由: `bridge.call`** — 调用时指定 `target` = bridgeId（`bridge.list` 查 ID/IP），
+   绕过默认路由，确定性调用（参见 Known Issues #6）
+3. **断开 failover** — 某 bridge 断开时，若其路由的工具被其他在线 bridge 也注册了，
+   自动回退到那个 bridge（服务器 index.ts close 处理）；否则清除该工具路由
+
 - Editor bridge (88 tools) 先连接 → Android bridge (35 tools) 后连接 → Android 覆盖重叠工具
-- 两个 bridge 都有 `scene.set_transform` → 调用路由到 **Android**（后注册者）
+- 两个 bridge 都有 `scene.set_transform` → 默认调用路由到 **Android**（后注册者）
 - 录屏工具 (`recording.*`) 只在 Android bridge 注册（`Platform = Android | iOS | Standalone`）
 - 验证路由目标: `scene.get_hierarchy` 返回 flat array `[...]` = Android; 返回 `{"value":[...],"Count":N}` = Editor
+- BridgeId 是每次连接生成的 GUID（BridgeClient.cs），非持久；`bridge.list` 显示的 clientPort
+  是随机客户端端口（每次连接都变），**不要用 ip+port 作稳定标识**——精确调用一律用 bridgeId
+- `tools/list`（含 MCP ListTools）返回的每个 bridge 工具 description 带 `[bridge: ip:port (id前8位)]`
+  前缀 = 该工具**当前路由目标**（last-registration-wins 结果）。AI 可直接从工具列表得知调用会打到谁；
+  标注用的是 `toolToBridge` 实际路由（非注册来源），与真实调用行为一致
 
 ## Android Runtime Testing
 
@@ -376,3 +468,19 @@ When `RequirePlayMode = true`, the tool is only registered when the Unity applic
 ### 4. 服务器日志无工具名（已修复）
 
 工具调用和响应日志现在包含工具名: `Calling tool 'input.gamepad' → bridge [xxx]` 和 `Received tool response tool='input.gamepad'`。
+
+### 5. MCP Server 需要显示 cmd 窗口
+
+MCP Server 必须在一个**可见的 cmd 窗口**中运行（用 `start.bat` 启动），不能以无窗口/后台方式启动。服务器日志实时输出到窗口，便于排查连接/工具调用/AB 传输问题。
+
+### 6. 多 Bridge 时工具路由到 Editor 而非 Android（设计决策，非缺陷）
+
+当 Editor 和 Android 同时连接且 Editor 处于 Play Mode 时，`last-registration-wins` 让 Editor 覆盖同名工具（`shader.hot_replace`、`assetbundle.hot_replace` 等）的路由。直接调用会路由到 **Editor** 而非 Android。
+
+这是**有意的默认行为**（见「Multi-Bridge 路由」三层机制）：无指定目标时，服务器按注册顺序取最后一个；需要确定性目标时，**用 `bridge.call` 显式指定**：`target` = Android bridge id，`method` + `params`。`bridge.list` 查看各 bridge ID/IP（Android 通常 `10.0.x.x`）。
+
+### 7. 同内容 AssetBundle 只能加载一次
+
+Unity AB 去重机制: 相同内容的 AB 只能被 `LoadFromMemory` 加载一次。若 `shader.hot_replace` 已加载某 AB 且未卸载，后续 `assetbundle.hot_replace` 加载同内容 AB 会报 `The AssetBundle 'Memory' can't be loaded because another AssetBundle with the same files is already loaded`。
+
+**解决**: 每次部署前先 `assetbundle.unload_all`，或使用不同内容的 AB。

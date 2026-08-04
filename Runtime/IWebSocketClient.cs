@@ -5,7 +5,9 @@ namespace SimpleMCPBridge.Runtime
 {
     /// <summary>
     /// Common interface for WebSocket client implementations.
-    /// Both WebSocketClient (custom RFC 6455) and NetWebSocketClient (ClientWebSocket) implement this.
+    /// The active transport is <see cref="NetWebSocketClient"/> (ClientWebSocket).
+    /// <see cref="WebSocketClient"/> (custom RFC 6455) is the legacy reference
+    /// implementation, marked [Obsolete] — do not use it for production.
     /// </summary>
     public interface IWebSocketClient : IDisposable
     {

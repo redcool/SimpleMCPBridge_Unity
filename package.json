@@ -1,0 +1,19 @@
+{
+  "name": "com.simplemcpbridge",
+  "version": "1.0.0",
+  "displayName": "Simple MCP Bridge",
+  "description": "Unity bridge for the SimpleMCPBridge MCP server. Exposes 95+ Unity tools (scene, input, UI, physics, recording, asset bundle hot-replace) to AI agents over WebSocket.",
+  "unity": "2022.3",
+  "author": {
+    "name": "SimpleMCPBridge"
+  },
+  "keywords": [
+    "mcp",
+    "websocket",
+    "ai",
+    "tool",
+    "bridge"
+  ],
+  "documentationUrl": "https://github.com/SimpleMCPBridge",
+  "license": "MIT"
+}

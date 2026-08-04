@@ -45,6 +45,13 @@ namespace SimpleMCPBridge.Runtime
         /// Prevents edit-mode-only tools from being registered during editor usage.
         /// </summary>
         public bool RequirePlayMode { get; set; } = false;
+        /// <summary>
+        /// Optional explicit category for this tool (e.g. "Scene", "Input", "Asset").
+        /// When null/empty, the category is auto-derived from the tool name prefix
+        /// (the part before the first '.'), e.g. "scene.get_hierarchy" → "Scene".
+        /// Used to group tools and to let agents enable/disable whole categories.
+        /// </summary>
+        public string Category { get; set; } = null;
 
         public MCPToolAttribute(string name, string description)
         {

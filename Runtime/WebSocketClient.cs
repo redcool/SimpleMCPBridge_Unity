@@ -20,7 +20,15 @@ namespace SimpleMCPBridge.Runtime
     ///   - 粘包: multiple WebSocket frames in one TCP segment
     ///   - 拆包: partial frame split across TCP segments
     ///   - 混合: HTTP response + first WS frame in one segment (the bug this fixes)
+    ///
+    /// == Status: LEGACY (research/reference only) ==
+    /// This custom implementation is NOT used by the bridge at runtime — the
+    /// active transport is <see cref="NetWebSocketClient"/> (wraps .NET's
+    /// ClientWebSocket). This class is kept as a dependency-free reference
+    /// implementation of RFC 6455 (handshake, frame masking, TCP 粘包 handling).
+    /// Do not instantiate it for production use.
     /// </summary>
+    [Obsolete("WebSocketClient is the legacy custom RFC 6455 implementation, kept for reference only. Use NetWebSocketClient (the active transport used by BridgeClient) instead.")]
     public class WebSocketClient : IWebSocketClient
     {
         // ── WebSocket protocol constants (RFC 6455) ──

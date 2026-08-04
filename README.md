@@ -42,6 +42,10 @@ SimpleMCPBridge 的设计理念是 **structured memory query**（结构化内存
 
 > `camera.screenshot` 仅作为**辅助手段**（调试、确认视觉布局），不是感知游戏状态的主路径。所有游戏状态都应从 Unity 对象的组件属性中直接读取。
 
+**工具类别机制**：95+ 个工具按类别组织（`[Scene]`/`[Ui]`/`[Ngui]`/`[Input]`/`[Game]`…），
+并支持运行时**按类别动态开关**（`tools.enable` / `tools.disable`）——只注册当前
+任务需要的工具集，减少 token 消耗。详见下文「工具类别与动态注册」章节。
+
 ## 前置要求
 
 - **Node.js 22+** — 运行 MCP Server
@@ -70,11 +74,13 @@ Assets/
 │   │   ├── MCPToolAttribute.cs      # [MCPTool] + [MCPToolClass] 特性
 │   │   ├── MCPMethodConst.cs        # 工具名常量
 │   │   ├── EncryptionHelper.cs      # AES-256-CBC 加解密
-│   │   ├── WebSocketClient.cs       # 零依赖 RFC 6455 WebSocket
+│   │   ├── WebSocketClient.cs       # 零依赖 RFC 6455 WebSocket（[Obsolete]，参考用）
+│   │   ├── NetWebSocketClient.cs    # 活动传输：.NET ClientWebSocket 封装
 │   │   ├── WebSocketInterfaces.cs   # WebSocket 接口抽象
 │   │   ├── Config/
 │   │   │   └── BridgeConfig.cs      # 配置加载（Editor/Player）
-│   │   ├── Handlers/       # 工具处理器（15+ Handler，88+ 个工具）
+│   │   ├── Handlers/       # 工具处理器（17+ Handler，95+ 个工具）
+│   │   │   └── NguiHandler.cs   # NGUI 工具（#if NGUI_ON 条件编译，未装 NGUI 不注册）
 │   │   ├── Tools/          # 工具辅助类
 │   │   └── Models/
 │   ├── Editor/
@@ -176,7 +182,7 @@ Bridge 生命周期独立于窗口：关闭窗口后 bridge 继续运行，进�
 
 解析优先级：`instanceId` > `path`。两个都传时先试 instanceId，找不到再 fallback 路径。
 
-## 可用工具（共 88+ 个）
+## 可用工具（共 95+ 个）
 
 ### 场景工具（SceneHandler，17 All + 9 Editor = 26 工具）
 
@@ -282,7 +288,7 @@ Quality → Bitrate 映射：
 
 **gamepad 轴名**：`leftStickX/Y`、`rightStickX/Y`、`leftTrigger`、`rightTrigger`
 
-### UI 分析 / 操作工具（GameHandler，8 工具）
+### UI 分析 / 操作工具（GameHandler，8 工具）— uGUI
 
 | 工具 | 参数 | 说明 |
 |------|------|------|
@@ -294,6 +300,39 @@ Quality → Bitrate 映射：
 | `ui.select_dropdown_option` | `path`/`instanceId`, `option`(int) 或 `optionText`(string) | 按索引或文本选择 Dropdown 选项 |
 | `ui.drag` | `fromPath`/`fromInstanceId`, `toPath`/`toInstanceId` | 通过 ExecuteEvents 模拟从一个 UI 元素拖拽到另一个 |
 | `ui.get_tooltip` | `path`/`instanceId` 或 `x`,`y` | 触发 PointerEnter 并扫描新出现的可见文本，返回 Tooltip 内容 |
+
+### NGUI 分析工具（NguiHandler，3 工具）— 独立工具集 ⚠ 需安装 NGUI
+
+> 针对使用 **NGUI**（第三方老牌 UI 插件）的旧项目。与上方 uGUI 工具**互相独立、互不互斥**：
+> 可同时开启，也可 `tools.disable ["Ui"]` 只留 NGUI（或反之，类别 `Ngui`/`Ui`）。
+> 点击模拟直接复用 `input.click_screen`（NGUI 的 UICamera 响应屏幕坐标）。
+
+**安装 NGUI（两种方式任选）**：`tasharen/ngui` 仓库无 package.json，不能直接用 versionDefines 检测。
+
+**方式 A：包化成 UPM 包（推荐）**——`NGUI_ON` 由 versionDefines 自动定义：
+
+1. `git clone https://github.com/tasharen/ngui.git <某目录>`
+2. 仓库根补 `package.json`：`{"name": "com.tasharen.ngui", "version": "3.12.0", ...}`
+3. 建 asmdef：`Scripts/NGUI.asmdef`（运行时，程序集名 `NGUI`）+ `Scripts/Editor/NGUI.Editor.asmdef`（`includePlatforms: ["Editor"]`，引用 `NGUI`）
+4. 排除示例：`Assets/NGUI/Examples` → 改名 `Examples~`
+5. 项目 `Packages/manifest.json` 加 `"com.tasharen.ngui": "file:../../ngui"`
+
+**方式 B：源码直接放 Assets/ + 手动符号**——仅省去「package.json + manifest 引用」：
+
+1. NGUI 源码拷入 `Assets/NGUI/`，**必须**建与方式 A 相同的两个 asmdef（asmdef 程序集无法引用裸放进 Assembly-CSharp 的 NGUI 代码）
+2. 排除示例：`Assets/NGUI/Examples` → 改名 `Examples~`
+3. **手动**加 `NGUI_ON` 符号：`Project Settings → Player → Scripting Define Symbols` 加 `NGUI_ON`（或 `SimpleMCPBridge.asmdef` 的 `defineConstraints` 加 `"NGUI_ON"`）
+
+> ⚠️ **警告**：`#if NGUI_ON` 打开但 NGUI 类型不可解析会报 CS0246——NGUI 源码必须放在有 `NGUI.asmdef` 的程序集里，
+> 且 `SimpleMCPBridge.asmdef` 的 `references` 含 `"NGUI"`（软引用）。两种方式此前提相同。
+
+SimpleMCPBridge 侧已配好：asmdef `versionDefines`（`com.tasharen.ngui` → `NGUI_ON`）+ `references` 软引用 `"NGUI"`。未装 NGUI 时工具不注册、仅一条 warning，不影响编译。
+
+| 工具 | 参数 | 说明 |
+|------|------|------|
+| `ngui.get_texts` | `contains`(可选过滤) | 从内存读取所有 NGUI UILabel 文本（无 OCR）。每个元素返回：文本内容、类型、transform path、归一化屏幕矩形 [xMin,yMin,xMax,yMax]、中心点、字号、对齐、颜色。同时返回屏幕尺寸 |
+| `ngui.find` | `type`(UIButton/UIToggle/UISlider/UIInput), `contains`(文本包含), `interactable`(bool) | 查找可交互 NGUI 元素及屏幕位置和状态。每个元素返回：type、path、label/text、interactable、归一化屏幕矩形、中心点。用 center 配合 input.click_screen 点击 |
+| `ngui.find_widgets` | `type`(widget 类型名如 UITexture/UISprite/UILabel), `contains`(名称或文本包含) | 查找所有 NGUI UIWidget（UITexture/UISprite/UILabel 等）及屏幕位置。每个元素返回：type、name、path、instanceId、归一化屏幕矩形、中心点；UILabel 额外含 text/fontSize/alignment/color。定位纯显示元素（如背景图）用此工具 |
 
 ### 统一输入工具（GameHandler，1 工具）
 
@@ -309,7 +348,7 @@ Quality → Bitrate 映射：
 | `game.get_time_scale` | — | 获取当前时间缩放。返回：timeScale（Time.timeScale）、fixedDeltaTime（Time.fixedDeltaTime）、realtimeSinceStartup、frameCount |
 | `game.get_spatial` | `origin`[3](可选), `playerPath`(可选), `radius`(默认10), `maxObjects`(默认20), `tag`, `layerName`, `typeFilter` | 获取参考点周围指定半径内的 3D 物体空间信息。返回物体名、instanceId、组件列表、世界坐标、距离、方向(归一化向量)、tag、layer。自动过滤空对象。支持按 tag/layer/组件类型过滤 |
 | `game.watch` | `signals`[](必填) | 注册一组信号持续监测。每个 signal 含 id、type(`property`)、path、component、property。返回当前值作为基线。示例：`[{"id":"hp","type":"property","path":"Player","component":"Health","property":"currentHP"}]` |
-| `game.get_delta` | — | 获取自上次调用以来所有 watch 信号的变化。只返回有变化的值（含新旧值）。无变化时返回空 |
+| `game.get_delta` | — | 获取自上次调用以来所有 watch 信号的变化。**桥侧每 ~167ms（10帧）持续检测**并缓存变化，本调用纯读缓存（读后清空）——两次调用之间的短事件也不会漏。只返回有变化的值（含新旧值）。无变化时返回空 |
 | `game.get_entities` | `typeFilter`(可选, AI/Health/CharacterController), `maxResults`(默认20) | 批量获取场景中带指定组件的实体及其关键状态。每个实体返回：name、instanceId、position、rotation、velocity（如有）、组件摘要值 |
 | `game.get_player` | `playerPath`(可选), `includeComponents`(默认false) | 一步获取玩家完整状态。返回：position、rotation、velocity、动画状态（如有 Animator）、所有挂载组件的关键属性。不传 playerPath 时自动查找 tagged Player |
 | `game.do_sequence` | `steps`[](必填), `timeout`(默认30s) | 在 Unity 侧一次性执行一组动作序列。返回 sequence ID 立即返回。支持 step type：`wait`(等待)、`key`(键盘)、`mouse_click`(鼠标点击)、`mouse_move`(鼠标移动)、`gamepad`(手柄)、`click_screen`(UI 点击)。key/mouse/gamepad 需 Input System，click_screen 不需要 |
@@ -379,15 +418,52 @@ Quality → Bitrate 映射：
 | `bridge.list` | — | 列出所有已连接 Bridge（ID/IP/工具数） |
 | `bridge.call` | `target`(bridgeId), `method`, `params` | 定向调用指定 Bridge 上的工具 |
 
+### 工具类别与动态注册（ToolsHandler，4 工具）
+
+每个工具的**描述都以 `[类别]` 开头**（如 `[Scene] 获取完整的场景层级树...`），
+类别由工具名前缀自动派生（`scene.xxx` → `Scene`，`assetbundle.xxx` → `AssetBundle`），
+方便人眼和 AI 快速扫描、分组。
+
+工具按类别动态注册/注销，避免无关工具干扰调用方：
+
+| 工具 | 参数 | 说明 |
+|------|------|------|
+| `tools.list_categories` | — | 列出所有类别：工具数 + 启用状态（含已禁用的类别） |
+| `tools.enable` | `categories`[](必填) 或 `all`(bool) | 启用指定类别，立即重新注册并推送新工具列表 |
+| `tools.disable` | `categories`[](必填) 或 `all`(bool) | 禁用指定类别，从注册表移除对应工具 |
+| `tools.reset` | — | 恢复全部类别（完整工具列表还原） |
+
+**示例**：本次任务只用场景操作，把无关的 AssetBundle/Shader/Recording 关掉：
+
+```json
+{"name": "tools.disable", "arguments": {"categories": ["AssetBundle", "Shader", "Recording"]}}
+```
+
+之后 `tools.list_categories` 会显示这三类 `"enabled": false`，它们也不会出现在
+`tools/list` 结果里。任务结束后 `tools.reset` 一键还原。
+
+**要点**：
+
+- 类别状态是 **static** 的，跨 Play Mode 切换、脚本重编译、router 重建都保留
+- `tools.disable all` 会保留 `Tools` 类别本身（4 个控制工具），保证永远能恢复
+- `mcp.list_tools` / `tools/list` 返回的就是当前启用的工具子集
+- 新增工具类时无需手动登记类别——注册器按名称前缀自动归类
+
 ## Multi-Bridge 路由
 
-多个 Unity Bridge 可同时连接：
+多个 Unity Bridge 可同时连接。三层机制：
 
-- **路由规则**：`last-registration-wins` — 后连接的 bridge 覆盖同名工具
-- Editor bridge（88+ tools）与 Android bridge（部分工具）共存
+1. **默认路由**：`last-registration-wins` — 后连接的 bridge 覆盖同名工具
+2. **显式路由**：`bridge.call` 指定 `target` = bridgeId，绕过默认路由，确定性调用
+3. **断开 failover**：某 bridge 断开时，其路由的工具若被其他在线 bridge 注册，自动回退；否则清除
+
+- Editor bridge（92+ tools）与 Android bridge（部分工具）共存
 - **Bridge 断线**：该 bridge 的工具从路由表移除；有其他 bridge 注册同工具时自动回退
 - 无 bridge 时待处理调用进入重试队列（30s 宽限期）
-- 使用 `bridge.list` 查看所有已连接 bridge
+- 使用 `bridge.list` 查看所有已连接 bridge（ID、IP、工具列表）
+- ⚠️ BridgeId 每次连接重新生成（GUID），`clientPort` 是随机客户端端口——**不要用 ip+port 作稳定标识**，精确调用一律用 bridgeId
+- `tools/list`（含 MCP ListTools）返回的每个 bridge 工具 description 带 `[bridge: ip:port (id前8位)]` 前缀 =
+  该工具**当前路由目标**（last-registration-wins 结果）。AI 可直接从工具列表得知调用会打到哪个 bridge
 
 ## LLM 集成
 
@@ -426,6 +502,15 @@ public class MyTools
 
 `RequirePlayMode = true` 时该工具仅当应用处于播放模式时注册，避免 Editor Edit Mode 下误调用。
 
+**类别自动派生**：工具描述会带上 `[类别] ` 前缀，类别默认取自工具名前缀
+（`my_tool_name` → `MyTool`，`assetbundle.xxx` → `AssetBundle`）。如需自定义类别：
+
+```csharp
+[MCPTool("my_tool_name", "工具描述", Category = "CustomGroup")]
+```
+
+归类后即可用 `tools.enable` / `tools.disable` 按类别动态开关。
+
 2. **自动注册** — `MessageRouter` 构造时扫描程序集，自动发现带 `[MCPTool]` 的方法。
 
 ### 规则
@@ -435,6 +520,7 @@ public class MyTools
 - `[MCPToolClass]` 标记类可加速发现
 - `Platform` 可选，控制哪些构建目标注册该工具
 - `RequirePlayMode` 可选，为 `true` 时工具仅在 Play Mode 时注册
+- `Category` 可选，覆盖自动派生的类别名（默认取工具名前缀）
 - 修改 C# 后等待 Unity 编译完成
 
 ### HandlerUtils 静态工具类
@@ -503,6 +589,43 @@ Get-Process -Name "node" | Stop-Process -Force
 ### 6. `RequirePlayMode` 注册时机
 
 `MCPToolRegistry` 在 `BridgeClient` 构造时扫描注册工具。由于 `BridgeClient` 是单例，工具注册只发生一次。进出 Play Mode 时如果 bridge 未断开，工具列表不会动态更新。但在标准工作流中（domain reload → bridge 重连），每次进入/退出 Play Mode 都会重新注册。
+
+### 7. MCP Server 需要显示 cmd 窗口
+
+MCP Server（`SimpleMcpServer`）必须在一个**可见的 cmd 窗口**中运行，不能以无窗口/后台方式启动：
+
+- 用 `start.bat` 启动（会打开 cmd 窗口并显示日志）
+- 不要用 `Start-Process -NoNewWindow` 或后台服务方式启动
+- 原因：服务器日志（连接、工具调用、AB 传输）实时输出到窗口，便于排查问题；且服务器进程需要保持前台运行
+
+### 8. 多 Bridge 时工具路由到 Editor 而非 Android（设计决策，非缺陷）
+
+当 Editor 和 Android 两个 bridge 同时连接，且 Editor 处于 Play Mode 时，`last-registration-wins` 规则会让 Editor 覆盖同名工具（如 `shader.hot_replace`、`assetbundle.hot_replace`）的路由。此时直接调用这些工具会路由到 **Editor** 而非 Android。
+
+这是**有意的默认行为**（见「Multi-Bridge 路由」三层机制）：无指定目标时，服务器按注册顺序取最后一个。需要确定性目标时，用 `bridge.call` 显式指定：
+
+```json
+{
+  "name": "bridge.call",
+  "arguments": {
+    "target": "<android_bridge_id>",
+    "method": "assetbundle.hot_replace",
+    "params": { "abUrl": "http://<server_ip>:45678/ab/<bundle>" }
+  }
+}
+```
+
+`bridge.list` 可查看各 bridge 的 ID 和 IP（Android 通常为 `10.0.x.x`）。
+
+### 9. 同内容 AssetBundle 只能加载一次
+
+Unity 的 AB 去重机制：**相同内容的 AssetBundle 只能被 `LoadFromMemory` 加载一次**。若 `shader.hot_replace` 已加载某 AB 且未卸载，后续 `assetbundle.hot_replace` 加载同内容 AB 会报：
+
+```
+The AssetBundle 'Memory' can't be loaded because another AssetBundle with the same files is already loaded.
+```
+
+**解决**：每次部署前先调用 `assetbundle.unload_all` 卸载所有已加载 bundle，或使用不同内容的 AB（不同文件名/内容）。
 
 ## 相关仓库
 

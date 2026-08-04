@@ -53,6 +53,13 @@ namespace SimpleMCPBridge.Runtime.Handlers
         private static readonly Dictionary<string, string> _watchBaselines = new();
         private const int MaxWatchEntries = 100;
 
+        // Continuous monitoring: Unity side polls watched signals every N frames and
+        // accumulates changes into a cache. game.get_delta then just reads (and clears)
+        // the cache instead of doing reflection reads on every call.
+        private static readonly List<string> _watchChanges = new();
+        private const int WatchTickIntervalFrames = 10; // ~167ms at 60fps
+        private static int _watchFrameCounter;
+
         // ══════════════════════════════════════════════════════════════
         //  ui.get_texts
         // ══════════════════════════════════════════════════════════════
@@ -757,12 +764,14 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "Only returns signals whose value changed. " +
             "Each change includes: id, value (new), old (previous). " +
             "Use game.watch to register signals first. " +
+            "Changes are detected continuously by the bridge (every ~167ms / 10 frames) " +
+            "and returned from cache — this call never blocks on reflection reads. " +
             "Returns empty when nothing changed.")]
         public static string GetDelta(string paramsJson)
         {
             try
             {
-                if (_watchConfigs.Count == 0)
+                if (_watchChanges.Count == 0)
                 {
                     return JsonHelper.BuildJsonObject(
                         ("success", "true"),
@@ -771,66 +780,10 @@ namespace SimpleMCPBridge.Runtime.Handlers
                     );
                 }
 
-                var changes = new List<string>();
-                var staleKeys = new List<string>();
-
-                foreach (var kvp in _watchConfigs)
-                {
-                    var id = kvp.Key;
-                    var config = kvp.Value;
-                    var type = config["type"] as string;
-                    string current;
-                    string errMsg = null;
-
-                    switch (type)
-                    {
-                        case "property":
-                        {
-                            current = ReadPropertyValue(
-                                config["path"] as string,
-                                config["component"] as string,
-                                config["property"] as string,
-                                out errMsg);
-                            break;
-                        }
-                        default:
-                            current = "";
-                            errMsg = $"unknown watch type '{type}'";
-                            break;
-                    }
-
-                    if (errMsg != null)
-                    {
-                        changes.Add(JsonHelper.BuildJsonObject(
-                            ("id", JsonHelper.EscapeString(id)),
-                            ("error", JsonHelper.EscapeString(errMsg))
-                        ));
-                        // Mark stale entries where the GameObject no longer exists
-                        if (errMsg.Contains("not found"))
-                        {
-                            staleKeys.Add(id);
-                        }
-                        continue;
-                    }
-
-                    var old = _watchBaselines.GetValueOrDefault(id, "");
-                    if (current != old)
-                    {
-                        changes.Add(JsonHelper.BuildJsonObject(
-                            ("id", JsonHelper.EscapeString(id)),
-                            ("value", JsonHelper.EscapeString(current)),
-                            ("old", JsonHelper.EscapeString(old))
-                        ));
-                        _watchBaselines[id] = current;
-                    }
-                }
-
-                // Clean up stale entries (GameObject no longer exists)
-                foreach (var key in staleKeys)
-                {
-                    _watchConfigs.Remove(key);
-                    _watchBaselines.Remove(key);
-                }
+                // Read and clear the accumulated changes (cache semantics: each change
+                // is delivered exactly once to the next get_delta caller).
+                var changes = new List<string>(_watchChanges);
+                _watchChanges.Clear();
 
                 var hasErrors = changes.Any(c => c.Contains("\"error\""));
                 return JsonHelper.BuildJsonObject(
@@ -848,6 +801,81 @@ namespace SimpleMCPBridge.Runtime.Handlers
         // ══════════════════════════════════════════════════════════════
         //  Internal helpers
         // ══════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Continuous monitoring tick — called from the main-thread update loop
+        /// (MCPBridge.Update / InstanceUpdate). Polls all watched signals every
+        /// WatchTickIntervalFrames frames and accumulates value changes into
+        /// _watchChanges. game.get_delta reads and clears this cache, so agents
+        /// never miss short-lived events that occur between their own polls.
+        /// </summary>
+        public static void TickWatch()
+        {
+            if (_watchConfigs.Count == 0) return;
+
+            if (++_watchFrameCounter < WatchTickIntervalFrames) return;
+            _watchFrameCounter = 0;
+
+            var staleKeys = new List<string>();
+
+            foreach (var kvp in _watchConfigs)
+            {
+                var id = kvp.Key;
+                var config = kvp.Value;
+                var type = config["type"] as string;
+                string current;
+                string errMsg = null;
+
+                switch (type)
+                {
+                    case "property":
+                    {
+                        current = ReadPropertyValue(
+                            config["path"] as string,
+                            config["component"] as string,
+                            config["property"] as string,
+                            out errMsg);
+                        break;
+                    }
+                    default:
+                        current = "";
+                        errMsg = $"unknown watch type '{type}'";
+                        break;
+                }
+
+                if (errMsg != null)
+                {
+                    _watchChanges.Add(JsonHelper.BuildJsonObject(
+                        ("id", JsonHelper.EscapeString(id)),
+                        ("error", JsonHelper.EscapeString(errMsg))
+                    ));
+                    // Mark stale entries where the GameObject no longer exists
+                    if (errMsg.Contains("not found"))
+                    {
+                        staleKeys.Add(id);
+                    }
+                    continue;
+                }
+
+                var old = _watchBaselines.GetValueOrDefault(id, "");
+                if (current != old)
+                {
+                    _watchChanges.Add(JsonHelper.BuildJsonObject(
+                        ("id", JsonHelper.EscapeString(id)),
+                        ("value", JsonHelper.EscapeString(current)),
+                        ("old", JsonHelper.EscapeString(old))
+                    ));
+                    _watchBaselines[id] = current;
+                }
+            }
+
+            // Clean up stale entries (GameObject no longer exists)
+            foreach (var key in staleKeys)
+            {
+                _watchConfigs.Remove(key);
+                _watchBaselines.Remove(key);
+            }
+        }
 
         /// <summary>
         /// Read a component property/field value by path. Returns "" on error with message in out param.
@@ -1598,21 +1626,22 @@ namespace SimpleMCPBridge.Runtime.Handlers
             return new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
         }
 
-        private static Type _tmpInputFieldType;
-        private static Type _tmpDropdownType;
-
         private static Type GetTMPInputFieldType()
         {
-            if (_tmpInputFieldType == null)
-                _tmpInputFieldType = Type.GetType("TMPro.TMP_InputField, Unity.TextMeshPro");
-            return _tmpInputFieldType;
+#if TEXT_MESH_PRO_ON
+            return typeof(TMPro.TMP_InputField);
+#else
+            return null;
+#endif
         }
 
         private static Type GetTMPDropdownType()
         {
-            if (_tmpDropdownType == null)
-                _tmpDropdownType = Type.GetType("TMPro.TMP_Dropdown, Unity.TextMeshPro");
-            return _tmpDropdownType;
+#if TEXT_MESH_PRO_ON
+            return typeof(TMPro.TMP_Dropdown);
+#else
+            return null;
+#endif
         }
 
         /// <summary>

@@ -19,26 +19,21 @@ namespace SimpleMCPBridge.Runtime.Tools
     public static class UIAnalysisTools
     {
         private static Type _tmpTextType;
-        private static bool _tmpChecked;
 
         /// <summary>
-        /// Try to resolve TextMeshProUGUI type via reflection (avoids hard compile dependency).
+        /// Resolve TextMeshProUGUI type. With TEXT_MESH_PRO_ON (asmdef versionDefine for
+        /// com.unity.textmeshpro + "Unity.TextMeshPro" soft reference) the type is a
+        /// compile-time constant; otherwise falls back to null (no TMP scanning).
         /// </summary>
         public static Type TMPTextType
         {
             get
             {
-                if (!_tmpChecked)
-                {
-                    _tmpChecked = true;
-                    // Try common TMP assembly names
-                    foreach (var asmName in new[] { "Unity.TextMeshPro", "UnityEngine.UI" })
-                    {
-                        _tmpTextType = Type.GetType($"TMPro.TextMeshProUGUI, {asmName}");
-                        if (_tmpTextType != null) break;
-                    }
-                }
-                return _tmpTextType;
+#if TEXT_MESH_PRO_ON
+                return typeof(TMPro.TextMeshProUGUI);
+#else
+                return null;
+#endif
             }
         }
 

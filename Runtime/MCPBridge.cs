@@ -127,6 +127,7 @@ namespace SimpleMCPBridge.Runtime
 #if UNITY_INPUT_SYSTEM
             MouseDeviceTools.TickDeferredClick();
 #endif
+            Handlers.GameHandler.TickWatch();
 
             if (_bridge.IsAutoReconnect && !_bridge.IsConnected && EditorApplication.timeSinceStartup - _lastAttemptTime > ReconnectInterval)
             {
@@ -150,6 +151,7 @@ namespace SimpleMCPBridge.Runtime
 #if UNITY_INPUT_SYSTEM
             MouseDeviceTools.TickDeferredClick();
 #endif
+            Handlers.GameHandler.TickWatch();
 
             if (_bridge.IsAutoReconnect && !_bridge.IsConnected && Time.unscaledTime - _lastAttemptTime > ReconnectInterval)
             {
