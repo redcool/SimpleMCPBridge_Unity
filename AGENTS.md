@@ -200,13 +200,25 @@ NGUI 源码仓库（`tasharen/ngui`）**没有 package.json / asmdef**，不能�
 
 #### 方式 A：包化成 UPM 包（推荐，versionDefines 自动生效）
 
+**使用现成模板（推荐）**：NGUI 仓库已含 `upm_template/` 目录（agent 可直接指导用户操作），按 `upm_template/readme.txt` 三步完成：
+
 1. `git clone https://github.com/tasharen/ngui.git <某目录>`（如 `H:\ai_works\ngui`）
-2. 仓库根补 `package.json`：`{"name": "com.tasharen.ngui", "version": "3.12.0", ...}`
-3. 建 asmdef（本仓库已按此结构验证）：
-   - `Assets/NGUI/Scripts/NGUI.asmdef` — 运行时，Any Platform，程序集名 `NGUI`
-   - `Assets/NGUI/Scripts/Editor/NGUI.Editor.asmdef` — `includePlatforms: ["Editor"]`，引用 `NGUI`
-4. 排除示例：`Assets/NGUI/Examples` → 改名 `Examples~`（Unity 不导入）
-5. 项目 `Packages/manifest.json` 加：`"com.tasharen.ngui": "file:../../ngui"`（相对路径按实际位置）
+2. 从 `upm_template/` 拷贝并按 `readme.txt` 放置：
+   - `NGUI.asmdef_temp` → `Assets/NGUI/Scripts/NGUI.asmdef`（改名去掉 `_temp`）
+   - `NGUI.Editor.asmdef_temp` → `Assets/NGUI/Scripts/Editor/NGUI.Editor.asmdef`（改名去掉 `_temp`）
+   - `package.json` → 仓库根（`com.tasharen.ngui` v3.12.0，含 UPM 化说明）
+3. 排除示例：`Assets/NGUI/Examples` → 改名 `Examples~`（Unity 不导入）
+4. 项目 `Packages/manifest.json` 加：`"com.tasharen.ngui": "file:../../ngui"`（相对路径按实际位置）
+
+**模板内容说明**：
+- `NGUI.asmdef_temp` — 运行时程序集，名 `NGUI`，Any Platform，无引用
+- `NGUI.Editor.asmdef_temp` — Editor 程序集，`includePlatforms: ["Editor"]`，引用 `NGUI`
+- `package.json` — name `com.tasharen.ngui` / version `3.12.0` / unity `2019.4`
+
+**手动方式（模板不可用时）**：按同样结构手写——
+- `Assets/NGUI/Scripts/NGUI.asmdef` — 运行时，Any Platform，程序集名 `NGUI`
+- `Assets/NGUI/Scripts/Editor/NGUI.Editor.asmdef` — `includePlatforms: ["Editor"]`，引用 `NGUI`
+- 仓库根 `package.json`：`{"name": "com.tasharen.ngui", "version": "3.12.0", ...}`
 
 `NGUI_ON` 由 asmdef `versionDefines` **自动**定义，零手动步骤。
 
