@@ -6,11 +6,18 @@
 
 ## 当前目标
 
-- **UPM 包化推进中**:已完成前置调研 + 独立性改造(BridgeConfig 重构、PowerUtilities 死引用移除),待 package.json 与 manifest 引用
+- **UPM 包化已完成迁移**:包位于 `H:\ai_works\SimpleMCPBridge`(独立 git 仓库),项目 `Packages/manifest.json` 用 `file:../../SimpleMCPBridge` 引用
 - 连接架构咨询已闭环:确认**保持短连接现状**(agent 侧走 `/rpc` HTTP 短连接,不切 SSE/WS 长连接)
 
 ## 完成项 (Completed)
 
+- [x] 2026-08 **UPM 包迁移(完成)** — 
+  - `package.json` 创建(`com.simplemcpbridge` v1.0.0,unity 2022.3)
+  - 目录复制到 `H:\ai_works\SimpleMCPBridge`(含 .git/.meta),manifest 加 `file:` 引用,源目录清空
+  - Unity `Client.Resolve()` 触发包解析 → packages-lock.json 记录 `file:../../SimpleMCPBridge`
+  - 验证:SimpleMCPBridge.dll 从新位置编译(17:10:39)、Editor bridge 重连(89 工具,新 bridgeId)、**0 Error**
+  - 注意:迁移时源目录外壳被 Unity 锁定(内容已清空),Unity 重启后自动消失,无影响
+  - **UPM 包也支持直接拷贝到 Assets/ 使用**——Runtime/Editor/asmdef/Resources 结构兼容,package.json 不生效但不影响使用
 - [x] 2026-08 **BridgeConfig 重构(UPM 友好)** — `Runtime/Config/BridgeConfig.cs` 重写:
   - Editor → 项目 `Assets/SimpleMCPBridge-config/bridge-config.json`(可写,首次自动从 Resources 拷贝,已存在不覆盖)
   - Player → `persistentDataPath/bridge-config.json`(原逻辑保留)
@@ -39,10 +46,10 @@
 
 ## 下一步 (Next Move)
 
-- **UPM 包化(用户确认后执行)**:
-  1. 包根加 `package.json`(name `com.simplemcpbridge` / version / unity / displayName)
-  2. clone 到项目外独立仓库(如 `H:\ai_works\SimpleMCPBridge`),项目 `Packages/manifest.json` 加 `"com.simplemcpbridge": "file:../../SimpleMCPBridge"`
-  3. PowerUtilities 依赖:已是死引用已移除,无需声明;跨项目分发时注意 InputSystem/NGUI/TMP 引用
+- **可选优化**:
+  - package.json 后续补充 `dependencies` 声明(如 com.unity.inputsystem 1.14.2 / com.unity.textmeshpro / com.tasharen.ngui),让 Unity 自动解析
+  - CHANGELOG.md / LICENSE 文件补充(发布到团队前的规范)
+  - 如需跨项目分发,仓库推送到远程(git remote)
 - 可选:agent 侧长连接需先给服务器 SSE 加 server→client 推送事件流,再改 opencode 配置(当前 `unityMCP` 指向 `http://127.0.0.1:8082/mcp` 是**另一个 MCP**,不是 SimpleMCPBridge,勿动)
 - 定期把本文件已验证结论迁移到 AGENTS.md
 
