@@ -91,6 +91,29 @@ namespace SimpleMCPBridge
             refContainer.Add(typeof(UnityEngine.Object).Assembly.Location);
             refContainer.Add(typeof(UnityEditor.Editor).Assembly.Location);
 
+            // Reference every loaded UnityEngine module assembly (UIElements, Physics,
+            // Audio, UI, ...) so editor.eval can compile against any engine type
+            // (e.g. UnityEngine.UIElements.Button) without reflection.
+            try
+            {
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    var asmName = asm.GetName().Name;
+                    if (asmName == null || !asmName.StartsWith("UnityEngine.", StringComparison.Ordinal))
+                        continue;
+                    string loc;
+                    try { loc = asm.Location; }
+                    catch { continue; } // dynamic/in-memory assemblies have no Location
+                    if (string.IsNullOrEmpty(loc) || refContainer.Contains(loc))
+                        continue;
+                    refContainer.Add(loc);
+                }
+            }
+            catch (Exception ex)
+            {
+                UnityEngine.Debug.LogWarning($"[MonoCSharpTools] Failed to add UnityEngine module references: {ex.Message}");
+            }
+
             // Disable debug info / set warning level / load default refs
             _tCompilerSettings.GetProperty("GenerateDebugInfo")?.SetValue(settings, false);
             _tCompilerSettings.GetProperty("WarningLevel")?.SetValue(settings, 0);

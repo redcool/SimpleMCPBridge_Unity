@@ -182,7 +182,7 @@ Bridge 生命周期独立于窗口：关闭窗口后 bridge 继续运行，进�
 
 解析优先级：`instanceId` > `path`。两个都传时先试 instanceId，找不到再 fallback 路径。
 
-## 可用工具（共 95+ 个）
+## 可用工具（共 101+ 个）
 
 ### 场景工具（SceneHandler，17 All + 9 Editor = 26 工具）
 
@@ -333,6 +333,31 @@ SimpleMCPBridge 侧已配好：asmdef `versionDefines`（`com.tasharen.ngui` →
 | `ngui.get_texts` | `contains`(可选过滤) | 从内存读取所有 NGUI UILabel 文本（无 OCR）。每个元素返回：文本内容、类型、transform path、归一化屏幕矩形 [xMin,yMin,xMax,yMax]、中心点、字号、对齐、颜色。同时返回屏幕尺寸 |
 | `ngui.find` | `type`(UIButton/UIToggle/UISlider/UIInput), `contains`(文本包含), `interactable`(bool) | 查找可交互 NGUI 元素及屏幕位置和状态。每个元素返回：type、path、label/text、interactable、归一化屏幕矩形、中心点。用 center 配合 input.click_screen 点击 |
 | `ngui.find_widgets` | `type`(widget 类型名如 UITexture/UISprite/UILabel), `contains`(名称或文本包含) | 查找所有 NGUI UIWidget（UITexture/UISprite/UILabel 等）及屏幕位置。每个元素返回：type、name、path、instanceId、归一化屏幕矩形、中心点；UILabel 额外含 text/fontSize/alignment/color。定位纯显示元素（如背景图）用此工具 |
+
+### UI Toolkit 分析工具（UIToolkitHandler，6 工具）— 独立工具集
+
+> 针对使用 **UI Toolkit**（`UnityEngine.UIElements`，UXML/USS/UIDocument）构建运行时 UI 的项目。
+> 与 uGUI（类别 `Ui`）和 NGUI（类别 `Ngui`）**互相独立、互不互斥**，类别 `Uitk`。
+> UI Toolkit 是引擎内置模块，**无条件编译**——无需装包、无需 versionDefines，注册即用；
+> 面板未 attach（非运行态）时优雅返回空结果，无需 Play Mode。
+> **不设 `UITK_ON` 条件编译**（有意决策）：`com.unity.modules.uielements` 是内置模块非可选包，2022.3 必在；
+> 客户工程 runtime 不用 UITK 时用 `tools.disable ["Uitk"]` 裁剪（临时、任务级，domain reload 自动恢复全开）。
+> **UITK 交互事件依赖 EventSystem 桥接**：面板要接收指针事件，场景必须有 `PanelEventHandler` + `PanelRaycaster`
+> （通常挂在 UIDocument 的 PanelSettings 持有者上，如 `EventSystem/Default Panel Settings`）——没有桥接则 UITK 无事件。
+> 注意：UITK 元素是 VisualElement（**非 GameObject，无 instanceId**）——用 `panelIndex`/`panelPath` + 元素 `path` 寻址
+> （`uitk.get_elements` 返回的 fullPath）。`input.click_screen`（EventSystem）能否驱动 UITK **取决于场景是否桥接**：
+> 面板 GameObject 挂了 `PanelEventHandler` + `PanelRaycaster` 时（UIDocument + EventSystem 的标准集成），click_screen
+> 可经 EventSystem 射中面板并触发 Clickable 的 `clicked`（已实测验证）；未桥接时 EventSystem 射不到 UITK 面板。
+> 确定性点击仍用 `uitk.click`（向 panel 注入 pooled PointerDown/Up，Clickable 自动生成 ClickEvent）。
+
+| 工具 | 参数 | 说明 |
+|------|------|------|
+| `uitk.get_panels` | — | 列出所有 UIDocument 面板：name、gameObjectPath、enabled、activeInHierarchy、attached、sortingOrder、panelSettingsSortingOrder、屏幕尺寸。用 gameObjectPath 作为后续调用的 panelPath |
+| `uitk.get_texts` | `contains`(可选过滤) | 从内存读取所有 UITK 文本（无 OCR）。扫描 Label/TextElement/TextField。每个元素返回：文本、类型、name、fullPath、归一化屏幕矩形 [xMin,yMin,xMax,yMax]、字号、颜色（Button 排除，由 uitk.find 覆盖） |
+| `uitk.find` | `type`(Button/Toggle/...), `contains` | 查找可交互 UITK 元素（Button/Toggle/Slider/SliderInt/DropdownField/TextField/ScrollView）及屏幕位置和状态。每个元素返回：typeName、name、fullPath、interactable、text/value、choices 数、归一化屏幕矩形、中心点 |
+| `uitk.get_elements` | `panelIndex`/`panelPath`(可选，默认全部) | 导出 UITK 视觉树。每个元素返回：name、typeName、fullPath、classes、enabled、visible、text/value、归一化矩形。单面板超 500 元素截断（truncated:true） |
+| `uitk.click` | `panelIndex`/`panelPath` + `path`（元素模式）或 `x`,`y` 归一化坐标（坐标模式） | 点击 UITK 元素。元素模式：在 `el.worldBound.center` 派发 pooled MouseDown+MouseUp（`GetPooled(Event)`，Clickable 生成 ClickEvent）；坐标模式：归一化坐标映射到 `root.worldBound`（与 uitk.find/get_elements 的 normalizedRect 同原点，左上角）+ `panel.Pick` 命中检查。需面板已 attach 且已布局（运行态） |
+| `uitk.set_value` | `panelIndex`/`panelPath` + `path` + `value`, `silent`(可选) | 设置元素值。Toggle=bool、Slider=float、SliderInt=int、DropdownField=索引或选项文本、TextField=string。默认 `value=X` 触发 ChangeEvent 生效；`silent=true` 用 SetValueWithoutNotify 静默 |
 
 ### 统一输入工具（GameHandler，1 工具）
 

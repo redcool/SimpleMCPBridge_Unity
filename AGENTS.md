@@ -57,7 +57,7 @@ server keeps only the most recent one.
 - **Server stderr:** `SimpleMcpServer/server.err`
 - **Unity Editor log:** `$env:LOCALAPPDATA\Unity\Editor\Editor.log`
 
-## Tools (95)
+## Tools (101)
 
 | Tool | What it does | Platform |
 |------|-------------|----------|
@@ -124,6 +124,12 @@ server keeps only the most recent one.
 | `ngui.get_texts` ⚠ | Read NGUI UILabel text from memory (no OCR) — requires NGUI package | All |
 | `ngui.find` ⚠ | Find interactive NGUI elements (UIButton/UIToggle/UISlider/UIInput) + state | All |
 | `ngui.find_widgets` ⚠ | Find all NGUI UIWidget (UITexture/UISprite/UILabel/...) + screen rect | All |
+| `uitk.get_panels` | List all UI Toolkit (UIDocument) panels + sortingOrder/enabled/attached | All |
+| `uitk.get_texts` | Read UITK text from memory (no OCR) — Label/TextElement/TextField | All |
+| `uitk.find` | Find interactive UITK elements (Button/Toggle/Slider/DropdownField/TextField/ScrollView) + state | All |
+| `uitk.get_elements` | Dump UITK visual tree (name/type/path/classes/rect/state) | All |
+| `uitk.click` | Click UITK element by path or normalized coords (pooled PointerDown/Up dispatch) | All |
+| `uitk.set_value` | Set Toggle/Slider/SliderInt/DropdownField/TextField value (optional silent) | All |
 | `ui.set_input_field_text` | Set InputField/TMP_InputField text directly | All |
 | `ui.set_toggle` | Set Toggle on/off | All |
 | `ui.set_slider` | Set Slider value (normalized 0-1 maps to minValue-maxValue) | All |
@@ -180,11 +186,23 @@ Tools are auto-discovered via `AutoRegisterAll()` — just create a class with
 - `tools.list_categories` shows all categories ever scanned (including currently-disabled ones)
   with `count` and `enabled` flags.
 
-### uGUI 与 NGUI 是独立工具集
+### uGUI / NGUI / UI Toolkit 是独立工具集
 
-- `ui.*`（uGUI: Canvas/Text/TMP）→ 类别 `Ui`；`ngui.*`（NGUI: UILabel/UIButton）→ 类别 `Ngui`。
-- 两者**互不互斥**：可同时开启，也可 `tools.disable ["Ui"]` 只留 NGUI（或反之）。
+- `ui.*`（uGUI: Canvas/Text/TMP）→ 类别 `Ui`；`ngui.*`（NGUI: UILabel/UIButton）→ 类别 `Ngui`；
+  `uitk.*`（UI Toolkit: UIDocument/VisualElement）→ 类别 `Uitk`。
+- 三者**互不互斥**：可同时开启，也可 `tools.disable ["Ui"]` 只留 NGUI（或反之）。
 - NGUI 工具用 `#if NGUI_ON` 条件编译 —— 项目未装 NGUI 时不注册 `ngui.*`，不影响编译。
+- UITK 工具**无条件编译** —— `UnityEngine.UIElements` 是引擎内置模块（2022.3+ 必有），注册即用；
+  面板未 attach（非运行态）时优雅返回空结果，无需 RequirePlayMode。
+- **不设 `UITK_ON` 条件编译**（有意决策）：`com.unity.modules.uielements` 是内置模块非可选包，
+  2022.3 必在（桌面平台 Unity 官方不支持移除模块），条件恒真、纯噪音；且编译期剔除会让
+  工具整体消失，比「优雅返回空结果」更糟。客户工程 runtime 不用 UITK 时，**用 `tools.disable ["Uitk"]`
+  裁剪**即可（临时、任务级、domain reload 自动恢复全开）——做好工具分类（类别 `Uitk`）就已足够。
+- **UITK 交互事件依赖 EventSystem 桥接**：UITK 面板要接收指针事件（点击/触摸），场景里必须有
+  `PanelEventHandler` + `PanelRaycaster`（通常挂在 UIDocument 的 PanelSettings 持有者 GameObject 上，
+  如 `EventSystem/Default Panel Settings`）。`PanelRaycaster` 让面板进入 `EventSystem.RaycastAll` 命中范围，
+  `PanelEventHandler` 实现 `IPointerUpHandler` 等接口把 ExecuteEvents 指针事件翻译成 UITK 事件 → Clickable → `clicked`。
+  **没有桥接 → UITK 无事件**（`input.click_screen` 射不到面板；`uitk.click` 不受影响，它直接向 panel 注入事件）。
 
 ### TMP 条件编译（TEXT_MESH_PRO_ON）
 
@@ -340,8 +358,10 @@ compilation error — check `editor.get_console` for details.
 | `Runtime/MCPToolRegistry.cs` | Scans for [MCPTool] methods |
 | `Runtime/Handlers/GameHandler.cs` | High-level game tools: ui.*, input.action, game.* |
 | `Runtime/Handlers/NguiHandler.cs` | NGUI tools: ngui.get_texts/find (#if NGUI_ON — requires com.tasharen.ngui) |
+| `Runtime/Handlers/UIToolkitHandler.cs` | UI Toolkit tools: uitk.* (UIDocument/VisualElement scan + pointer event injection) |
 | `Runtime/Tools/UIAnalysisTools.cs` | Canvas UI scanning (Text + TMP + interactive elements) |
 | `Runtime/Tools/NGUIAnalysisTools.cs` | NGUI scanning (UILabel text + UIButton/UIToggle/UISlider/UIInput) (#if NGUI_ON) |
+| `Runtime/Tools/UIToolkitAnalysisTools.cs` | UITK scanning (Label/TextField text + interactive elements + visual tree dump) |
 | `Runtime/Tools/InputActionTools.cs` | Virtual Gamepad + combined input (keys/mouse/axes) |
 | `Runtime/Handlers/SceneHandler.cs` | Scene inspection + manipulation tools |
 | `Runtime/Handlers/RecordingHandler.cs` | Gameplay recording tools (CyberAgent InstantReplay) |
@@ -507,3 +527,23 @@ MCP Server 必须在一个**可见的 cmd 窗口**中运行（用 `start.bat` �
 Unity AB 去重机制: 相同内容的 AB 只能被 `LoadFromMemory` 加载一次。若 `shader.hot_replace` 已加载某 AB 且未卸载，后续 `assetbundle.hot_replace` 加载同内容 AB 会报 `The AssetBundle 'Memory' can't be loaded because another AssetBundle with the same files is already loaded`。
 
 **解决**: 每次部署前先 `assetbundle.unload_all`，或使用不同内容的 AB。
+
+### 8. `uitk.click` 合成点击的隐藏 gate（clicked 静默不触发）
+
+**现象**: `uitk.click` 返回 success、无报错，但 Button 的 `clicked` 回调不触发。
+
+**根因**: Clickable 的 `clicked` 只在 `ProcessUpEvent` 里经 `ContainsPointer(pointerId)` 触发，该缓存仅在**两条同时满足**时写入:
+1. 事件 `triggeredByOS == true` —— 只有 `MouseDownEvent/MouseUpEvent.GetPooled(Event)` 工厂会设置；PointerDown/PointerUp 的 GetPooled 重载**不会**
+2. 坐标落在 `panel.visualTree.layout`（**panel 空间**）内
+
+任一不满足 → 静默 no-op，不报错。
+
+**修法**（已固化在 `UIToolkitHandler.DispatchClick`）: `GetPooled(Event)` + 坐标取 `el.worldBound.center`（panel 空间，与 uitk.find 的 normalizedRect 同原点）+ 布局内 clamp + `panel.Pick(position)` 前置检查（命中失败返回显式错误）。`IPanel` 接口在 2022.3 **没有** `GetTopElementUnderPointer`（CS1061）——公共命中测试用 `panel.Pick(position)`。
+
+### 9. 编译错误会静默阻断 `scene.enter_play_mode`
+
+**现象**: `scene.enter_play_mode` 返回 `success:false`，连续轮询 `scene.get_play_mode` 全是 `edit`，表面无报错。
+
+**根因**: Unity 拒绝在编译错误状态下进入 Play Mode。`editor.get_console` 最近 50 条可能全是 Log（编译错误在更早位置），被误导为「无报错」。
+
+**排查**: 直接搜 console 的 `error CS`（或查 `$env:LOCALAPPDATA\Unity\Editor\Editor.log`）确认编译状态，先修编译错误再进 Play Mode。

@@ -40,6 +40,25 @@
 - [x] 2026-08 **game.get_delta 持续监测升级** — `GameHandler.TickWatch()` 每 10 帧(~167ms)检测 `_watchConfigs` → 变化入 `_watchChanges` 缓存;`get_delta` 读缓存 + 读后清空;`MCPBridge.Update`/`InstanceUpdate` 挂接 TickWatch
   - 验证:改值等 2s 不轮询 → delta 捕捉到;读后二次为空;回环变化(改回原值)也捕捉
 - [x] 2026-08 **连接架构咨询(用户问题)** — ① bridge=ClientWebSocket→node ws 服务器(NetWebSocketClient, BridgeClient.cs:135; WebSocketServer, index.ts:679);工具调用是 server→bridge 经 WS 长连接 JSON-RPC(callBridge→ws.send, index.ts:448),agent 经 /rpc HTTP 短连接(index.ts:1250) ② bridge 侧 RPC 在长连接上,agent 侧是短连接 ③ 长连接需 opencode MCP 配置指向 `/sse`+`/mcp`(SSEServerTransport, index.ts:979-1005, 当前无 server→client 主动推送)
+- [x] 2026-08 **uitk.\* 工具集实现** — `uitk.get_panels/get_texts/find/get_elements/click/set_value`(类别 `Uitk`,6 工具)
+  - 新文件: `Runtime/Tools/UIToolkitAnalysisTools.cs`(纯工具类)+ `Runtime/Handlers/UIToolkitHandler.cs`([MCPToolClass]);MCPMethodConst.cs 加 6 常量
+  - **无 asmdef 改动**(UnityEngine.UIElements 引擎内置,无条件编译);类别自动推导 `Uitk`,无需 Category 覆写
+  - 关键实现: click = pooled MouseDown/MouseUp + SendEvent(不手动派发 ClickEvent/Capture,Clickable 自动生成);坐标模式 = 归一化坐标映射到 root.worldBound(与 get_elements/find 的 normalizedRect 同原点);坐标归一化除以 root.worldBound(缩放无关)
+- [x] 2026-08 **uitk.\* 工具 Unity 实测通过(Play Mode + UIDocument)** —
+  - 测试场景: `H:\ai_works\TestAIMcpPrj\Assets\Tests\TestUIDoc.uxml`(Button TestButton + Label)+ `TestUIDoc.cs`(Start 里 `bt.clicked += Debug.Log`,仅在 Play Mode 注册)
+  - `uitk.click` 元素模式(path)→ `clicked` 回调触发 ✅;重复点击各触发恰好一次 ✅;坐标模式(x/y 归一化中心)→ 触发 ✅;**无双触发**
+  - 修复 2 个 bug: ① `editor.eval` 的 Mono.CSharp refContainer 补 `UnityEngine.*` 模块程序集(否则 UIElements 类型无法解析,语句块静默编译失败)② `ResolveElement` 支持带 PanelSettings 前缀的全路径(多起点 + 跳过同名段)
+  - Edit Mode 下面板即 attached 可读可 set_value(无布局无 rect);交互(click/坐标)需 Play Mode
+- [x] 2026-08 **四种 click 路径全实测(Play Mode 驱动 UITK TestButton)** —
+  - `uitk.click`(原生 SendEvent)→ ✅;`input.mouse_click`(Win32 分支: WarpCursorPosition+SendInput 真实 OS 级)→ ✅
+  - `input.touch` tap(InputSystem 虚拟 Touchscreen, QueueStateEvent)→ ✅;`input.click_screen`(EventSystem ExecuteHierarchy)→ ✅
+  - 每条路径 clicked 回调各恰好触发一次,console 栈完整(TestUIDoc lambda 为栈顶)
+  - **坐标翻转**: uitk.find 的 center 是左上原点(UI Toolkit 空间),input.mouse_click/touch 用左下原点(Screen 空间)→ y 需 `1 - y_uitk`
+  - **意外发现**: click_screen 在本场景能驱动 UITK —— 因为 `EventSystem/Default Panel Settings` 挂了 PanelEventHandler+PanelRaycaster 桥接组件(RaycastAll 命中 + ExecuteEvents 指针事件翻译成 UITK 事件)。README 原「click_screen 不驱动 UITK」表述已修正为「取决于场景是否桥接」
+- [x] 2026-08 **UITK 事件桥接 + 无 UITK_ON 决策(用户拍板)** —
+  - UITK 交互事件**依赖 EventSystem 桥接**(PanelEventHandler + PanelRaycaster),无桥接 → UITK 无事件(input.click_screen 射不到,uitk.click 不受影响)
+  - **不加 `UITK_ON` 条件编译**: uielements 是内置模块非可选包(2022.3 必有,桌面平台官方不支持移除),条件恒真;客户 runtime 不用 UITK 时用 `tools.disable ["Uitk"]` 裁剪即可,做好分类(类别 `Uitk`)就够
+  - 已同步: AGENTS.md(uGUI/NGUI/UITK 独立工具集段落)、README.md(UITK 工具块)、本文件
 
 ## 进行中 (Active)
 
@@ -47,6 +66,7 @@
 
 ## 下一步 (Next Move)
 
+- **待办: 无**(uitk 6 工具已全部实测验证)
 - **可选优化**:
   - package.json 后续补充 `dependencies` 声明(如 com.unity.inputsystem 1.14.2 / com.unity.textmeshpro / com.tasharen.ngui),让 Unity 自动解析
   - CHANGELOG.md / LICENSE 文件补充(发布到团队前的规范)
@@ -62,6 +82,7 @@
 4. **Memory 文件与 AGENTS.md 分工**:本文件=动态进度快照;AGENTS.md=静态知识库(已验证结论迁移过去,避免 AGENTS.md 膨胀)
 5. **UPM 包配置策略**:Editor 读项目 `Assets/SimpleMCPBridge-config/`(可写),Player 读 persistentDataPath(可写),Resources 只做默认值兜底 —— 因为 UPM 包内文件只读,不能作为用户配置唯一入口
 6. **单 asmdef + #if UNITY_EDITOR 保持不拆**:UPM 允许;8 处 UnityEditor 引用全部条件编译保护,已验证
+7. **类别状态不加 EditorPrefs 持久化**:裁剪是任务级临时状态(非用户偏好);EditorPrefs 全局会跨项目污染、陈旧状态破坏「装包即全开」契约;domain reload 重置回全开是安全默认。若未来出现「长任务重编译致 token 回升」痛点,再上「项目级 EditorPrefs + persisted 标注」方案(行为已写入 AGENTS.md/README.md)
 
 ## 最近踩坑 (Recents Pitfalls)
 
@@ -70,6 +91,9 @@
 - NGUI 符号定义 ≠ 类型可解析:versionDefines 加 `NGUI_ON` 只是定义符号,还必须 asmdef `references` 含 `"NGUI"` 才能解析类型,否则 CS0246
 - 长连接隐患:Unity 重开 → opencode MCP 断连 → 必须重开 opencode → 会话记忆丢失(已用本文件规避)
 - `scene.*` 组件操作参数名是 `componentType` 不是 `component`(例外:game.wait 用 `component`),已固化 AGENTS.md
+- **编译错误会静默阻断 Play Mode**:`scene.enter_play_mode` 返回 `success:false` + 连续轮询 `get_play_mode` 全是 `edit`,第一反应是查编译——editor.get_console 的最近 50 条里可能全是 Log(编译错误在更早位置),要直接搜 `error CS` 或查 `Editor.log`。本会话 CS1061 卡了 Play Mode 一整天
+- **`IPanel.GetTopElementUnderPointer` 在本 Unity 2022.3 patch 不存在**(CS1061):`IPanel` 接口没有该方法;公共命中测试用 `panel.Pick(position)`(已用于 uitk.click 的 gate 检查)
+- **uitk.click 合成点击的隐藏 gate**:Clickable 的 `clicked` 只在 ProcessUpEvent 里经 `ContainsPointer(pointerId)` 触发,该缓存仅在 ①事件 `triggeredByOS=true`(只有 `MouseDownEvent/MouseUpEvent.GetPooled(Event)` 工厂会设置;PointerDown/Up 的 GetPooled 重载不会)且 ②坐标落在 `panel.visualTree.layout`(panel 空间)内才写入。两条任一不满足 → 静默 no-op 不触发回调。修法:用 `GetPooled(Event)` + `el.worldBound.center`(panel 空间)+ 布局内 clamp + `panel.Pick` 前置检查
 
 ## 相关文件索引
 

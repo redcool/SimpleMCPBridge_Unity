@@ -172,6 +172,20 @@ namespace SimpleMCPBridge.Runtime
         /// <summary>查找场景中所有 NGUI UIWidget（UITexture/UISprite/UILabel 等）及其屏幕坐标。</summary>
         public const string NGUI_FIND_WIDGETS = "ngui.find_widgets";
 
+        // ── UI Toolkit 分析工具（UnityEngine.UIElements 内置模块，始终可用，独立于 ui.*/ngui.*）──
+        /// <summary>获取场景中所有 UI Toolkit (UIDocument) 面板信息。</summary>
+        public const string UITK_GET_PANELS = "uitk.get_panels";
+        /// <summary>读取所有 UI Toolkit 文本内容（Label/TextElement/TextField，内存读取无 OCR）。</summary>
+        public const string UITK_GET_TEXTS = "uitk.get_texts";
+        /// <summary>查找可交互的 UI Toolkit 元素（Button/Toggle/Slider/SliderInt/DropdownField/TextField/ScrollView）。</summary>
+        public const string UITK_FIND = "uitk.find";
+        /// <summary>导出 UI Toolkit 视觉树元素列表（名称/类型/路径/类名/可见性/值）。</summary>
+        public const string UITK_GET_ELEMENTS = "uitk.get_elements";
+        /// <summary>点击 UI Toolkit 元素（按路径或归一化坐标）。</summary>
+        public const string UITK_CLICK = "uitk.click";
+        /// <summary>设置 UI Toolkit 元素值（Toggle/Slider/SliderInt/DropdownField/TextField）。</summary>
+        public const string UITK_SET_VALUE = "uitk.set_value";
+
         // ── 统一输入工具 ──
         /// <summary>统一输入：键盘、鼠标、滚轮、轴（Input System + Legacy Input）。</summary>
         public const string INPUT_ACTION = "input.action";
