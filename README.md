@@ -444,7 +444,10 @@ SimpleMCPBridge 侧已配好：asmdef `versionDefines`（`com.tasharen.ngui` →
 
 **要点**：
 
-- 类别状态是 **static** 的，跨 Play Mode 切换、脚本重编译、router 重建都保留
+- **默认全部启用**——条件编译只决定工具"是否存在"（装包即编译注册，如 NGUI 装上后 `ngui.*` 自动可用），
+  `tools.enable` 无需 AI 主动调用；`tools.disable` 是纯 AI 侧裁剪机制，用于砍掉无关工具省 token
+- 类别状态是 **static** 的（纯内存，无 EditorPrefs/PlayerPrefs 持久化）：跨 Play Mode 切换、router 重建保留；
+  **脚本重编译 / Editor 重启（domain reload）后重置为全部启用**
 - `tools.disable all` 会保留 `Tools` 类别本身（4 个控制工具），保证永远能恢复
 - `mcp.list_tools` / `tools/list` 返回的就是当前启用的工具子集
 - 新增工具类时无需手动登记类别——注册器按名称前缀自动归类

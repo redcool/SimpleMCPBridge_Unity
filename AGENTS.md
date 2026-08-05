@@ -171,7 +171,11 @@ Tools are auto-discovered via `AutoRegisterAll()` — just create a class with
   so agents can scan/group tools quickly.
 - `tools.enable` / `tools.disable` / `tools.reset` change which categories are registered
   and immediately push the new tool list to the server (via `ReRegisterTools`).
-- Category state is **static** — it survives Play Mode transitions and router rebuilds.
+- **Default: all categories are enabled.** Conditional compilation (`#if NGUI_ON`, `#if INSTANT_REPLAY_ON`, ...)
+  only decides which tools *exist* — installed packages' tools are registered out of the box, no `tools.enable`
+  needed. `tools.disable` is purely an AI-side pruning mechanism to cut irrelevant tools and save tokens.
+- Category state is **static** (in-memory only, no EditorPrefs/PlayerPrefs persistence) — it survives Play Mode
+  transitions and router rebuilds, but **resets to all-enabled on domain reload** (script recompilation / Editor restart).
 - `tools.disable all` keeps only the `Tools` category alive, so the control tools are always available.
 - `tools.list_categories` shows all categories ever scanned (including currently-disabled ones)
   with `count` and `enabled` flags.
