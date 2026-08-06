@@ -31,6 +31,8 @@ namespace SimpleMCPBridge.Runtime
         public const string SET_TRANSFORM = "scene.set_transform";
         /// <summary>修改组件属性。</summary>
         public const string SET_COMPONENT_PROPERTY = "scene.set_component_property";
+        /// <summary>调用组件上的公共实例方法（反射，按名称传参）。</summary>
+        public const string CALL_COMPONENT_METHOD = "scene.call_component_method";
         /// <summary>获取组件所有可序列化属性名+值。</summary>
         public const string GET_COMPONENT_PROPERTIES = "scene.get_component_properties";
         /// <summary>启用/禁用 GameObject。</summary>
