@@ -1,4 +1,5 @@
 ﻿using SimpleMCPBridge.Runtime;
+using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 
@@ -24,10 +25,20 @@ namespace SimpleMCPBridge
             public string serverIp = "127.0.0.1";
             public int serverPort = 45678;
             public string encryptionKey = "";
+            /// <summary>追加的 scene.call_component_method 拦截项：可含 "MethodName" 或 "TypeName.MethodName"。空数组 = 无追加。</summary>
+            public string[] methodBlocklist = new string[0];
+            /// <summary>scene.call_component_method 白名单：非空 = 白名单模式（同上两种格式）。空数组 = 关闭。</summary>
+            public string[] methodAllowlist = new string[0];
         }
 
         /// <summary>Shared encryption key for AES-256-CBC payload encryption. Empty = no encryption.</summary>
         public static string EncryptionKey { get; private set; } = "";
+
+        /// <summary>追加拦截项（来自 config.methodBlocklist，已清洗）。代码默认黑名单始终生效、不在此处。</summary>
+        public static string[] MethodBlocklistExtra { get; private set; } = new string[0];
+
+        /// <summary>白名单项（来自 config.methodAllowlist，已清洗）。空数组 = 白名单模式关闭。</summary>
+        public static string[] MethodAllowlist { get; private set; } = new string[0];
 
         /// <summary>
         /// 启动时调用：确保目标位置存在可写的配置文件副本（不存在则从 Resources 拷贝默认值）。
@@ -96,6 +107,8 @@ namespace SimpleMCPBridge
                 ip = config.serverIp;
                 port = config.serverPort;
                 EncryptionKey = config.encryptionKey ?? "";
+                MethodBlocklistExtra = SanitizeList(config.methodBlocklist);
+                MethodAllowlist = SanitizeList(config.methodAllowlist);
                 return true;
             }
             catch (System.Exception ex)
@@ -103,6 +116,22 @@ namespace SimpleMCPBridge
                 DebugUtils.LogWarning($"[BridgeConfig] Failed to parse config: {ex.Message}");
                 return false;
             }
+        }
+
+        /// <summary>
+        /// 清洗配置数组：去首尾空白、丢弃空/null 项、保留原大小写（下游比较一律大小写不敏感）。
+        /// JsonUtility 对缺失的 JSON key 保留字段默认值 → 旧配置（无新 key）安全回退为空数组。
+        /// </summary>
+        private static string[] SanitizeList(string[] raw)
+        {
+            if (raw == null || raw.Length == 0) return new string[0];
+            var list = new List<string>(raw.Length);
+            foreach (var item in raw)
+            {
+                if (string.IsNullOrWhiteSpace(item)) continue;
+                list.Add(item.Trim());
+            }
+            return list.ToArray();
         }
 
         /// <summary>目标配置文件路径：Editor 在项目 Assets 下，Player 在 persistentDataPath。</summary>

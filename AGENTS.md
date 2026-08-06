@@ -50,6 +50,11 @@ server keeps only the most recent one.
 - **Bridge (Player):** `Application.persistentDataPath/bridge-config.json` — 同上逻辑
 - 兜底: 包内 `Runtime/Resources/bridge-config.json` 内嵌默认值
 - Both use the same format. Cloud deployment: server `ip: "0.0.0.0"`.
+- `scene.call_component_method` 权限字段（可选，需重启生效）：
+  - `methodBlocklist`: 数组，追加拦截项（`"MethodName"` 或 `"TypeName.MethodName"`，大小写不敏感）；代码默认 6 项
+    （`destroy`/`destroyimmediate`/`destroyobject`/`quit`/`quitimmediate`/`disconnect`）**始终生效，无法通过配置移除**
+  - `methodAllowlist`: 空数组 = 关闭；非空 = 白名单模式，只放行命中的方法（同上两种格式）；白名单**不会覆盖**黑名单
+    —— 调用权限合并语义：代码默认黑名单 + 配置追加黑名单 双重拦截始终优先，白名单只是最后一道放行门槛
 
 ## Logs
 

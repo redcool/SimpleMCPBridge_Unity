@@ -46,14 +46,69 @@ namespace SimpleMCPBridge.Runtime.Handlers
         private static readonly Dictionary<Type, Dictionary<string, MethodInfo>> _methodCache = new();
 
         /// <summary>
-        /// Method names blocked from scene.call_component_method (destructive or
-        /// bridge-internal). Checked case-insensitively BEFORE any reflection lookup.
+        /// Code-default method names blocked from scene.call_component_method (destructive or
+        /// bridge-internal). Baseline — NEVER removable via config. Checked case-insensitively
+        /// BEFORE any reflection lookup. Config may APPEND extra blocked names (methodBlocklist)
+        /// or enable whitelist mode (methodAllowlist), but can never lift these defaults.
         /// </summary>
-        private static readonly string[] s_blockedMethodNames =
+        private static readonly string[] s_codeBlockedMethodNames =
         {
             "destroy", "destroyimmediate", "destroyobject",
             "quit", "quitimmediate", "disconnect",
         };
+
+        /// <summary>
+        /// Effective blocklist = code defaults ∪ config extras (BridgeConfig.MethodBlocklistExtra).
+        /// Built ONCE lazily — config is 重启生效 (loaded at startup, static until next load),
+        /// so it is never rebuilt per call.
+        /// </summary>
+        private static string[] s_effectiveBlocklist;
+
+        /// <summary>
+        /// Allowlist entries (BridgeConfig.MethodAllowlist). Non-empty = whitelist mode.
+        /// Built ONCE lazily alongside the effective blocklist.
+        /// </summary>
+        private static string[] s_effectiveAllowlist;
+
+        /// <summary>
+        /// Lazily build the effective blocklist (code defaults ∪ config extras, deduped
+        /// case-insensitively) and snapshot the allowlist. Null-check init: built on the
+        /// first tool call and reused for the lifetime of the loaded config.
+        /// </summary>
+        private static void EnsureMethodAccessCache()
+        {
+            if (s_effectiveBlocklist != null)
+                return;
+
+            var extra = BridgeConfig.MethodBlocklistExtra ?? new string[0];
+            var combined = new List<string>(s_codeBlockedMethodNames.Length + extra.Length);
+            combined.AddRange(s_codeBlockedMethodNames);
+            foreach (var name in extra)
+            {
+                if (!combined.Contains(name, StringComparer.OrdinalIgnoreCase))
+                    combined.Add(name);
+            }
+            s_effectiveBlocklist = combined.ToArray();
+            s_effectiveAllowlist = BridgeConfig.MethodAllowlist ?? new string[0];
+        }
+
+        /// <summary>
+        /// Match a blocklist/allowlist entry against a component type + method name.
+        /// Entry formats: "MethodName" (any component) or "TypeName.MethodName" (specific component).
+        /// Comparison is case-insensitive. Malformed entries (empty parts) never match.
+        /// </summary>
+        private static bool MatchesBlockEntry(string entry, string typeName, string methodName)
+        {
+            if (string.IsNullOrEmpty(entry)) return false;
+            var dot = entry.IndexOf('.');
+            if (dot < 0)
+                return string.Equals(entry, methodName, StringComparison.OrdinalIgnoreCase);
+            // "TypeName.MethodName" — type part matched against the runtime component type name.
+            var entryType = entry.Substring(0, dot).Trim();
+            var entryMethod = entry.Substring(dot + 1).Trim();
+            return string.Equals(entryType, typeName, StringComparison.OrdinalIgnoreCase) &&
+                   string.Equals(entryMethod, methodName, StringComparison.OrdinalIgnoreCase);
+        }
         [MCPTool(MCPMethodConst.GET_HIERARCHY, "Get the full scene hierarchy as a tree of objects with position, components, children, and transform path")]
         public static string GetHierarchy(string paramsJson)
         {
@@ -359,14 +414,27 @@ namespace SimpleMCPBridge.Runtime.Handlers
 
             var componentTypeActual = component.GetType();
 
-            // Safety: block destructive / bridge-internal method names (case-insensitive), BEFORE reflection.
-            if (s_blockedMethodNames.Any(n => string.Equals(n, methodName, StringComparison.OrdinalIgnoreCase)))
+            // Triple gate — order matters (blocklists first; allowlist can NEVER override them).
+            EnsureMethodAccessCache();
+
+            // 1. Code-default blocklist (baseline, not configurable) — plain method names.
+            if (s_codeBlockedMethodNames.Any(n => string.Equals(n, methodName, StringComparison.OrdinalIgnoreCase)))
                 return ErrorJson($"Method '{methodName}' is blocked (destructive/bridge-internal)");
 
-            // Safety: never reflect into the bridge's own assemblies.
+            // 2. Config-extra blocklist (methodBlocklist appends; "MethodName" or "TypeName.MethodName").
+            //    s_effectiveBlocklist also carries the code defaults (redundant with step 1 — harmless).
+            if (s_effectiveBlocklist.Any(e => MatchesBlockEntry(e, componentTypeActual.Name, methodName)))
+                return ErrorJson($"Method '{methodName}' is blocked (destructive/bridge-internal)");
+
+            // 3. Namespace guard (never configurable) — never reflect into the bridge's own assemblies.
             if (componentTypeActual.Namespace != null &&
                 componentTypeActual.Namespace.StartsWith("SimpleMCPBridge", StringComparison.Ordinal))
                 return ErrorJson($"Method '{methodName}' is blocked (destructive/bridge-internal)");
+
+            // 4. Whitelist mode — non-empty allowlist: method must ALSO match an entry.
+            if (s_effectiveAllowlist.Length > 0 &&
+                !s_effectiveAllowlist.Any(e => MatchesBlockEntry(e, componentTypeActual.Name, methodName)))
+                return ErrorJson($"Method '{methodName}' is not in allowlist");
 
             // The 'args' param is a nested JSON object → parsed to a raw JSON string by ParseJsonValue,
             // so it needs a second pass. Unknown/extra keys are simply ignored below.

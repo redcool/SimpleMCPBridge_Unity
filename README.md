@@ -155,6 +155,12 @@ Bridge 生命周期独立于窗口：关闭窗口后 bridge 继续运行，进�
 - **Editor** — 直接从项目文件读取
 - **Player** — 首次从 `Resources` 拷贝到 `Application.persistentDataPath`
 
+`scene.call_component_method` 权限字段（可选，需重启生效）：
+- `methodBlocklist` — 追加拦截项（`"MethodName"` 或 `"TypeName.MethodName"`，大小写不敏感）；代码默认 6 项
+  （`destroy`/`destroyimmediate`/`destroyobject`/`quit`/`quitimmediate`/`disconnect`）始终生效，无法通过配置移除
+- `methodAllowlist` — 空 = 关闭；非空 = 白名单模式，只放行命中的方法；白名单**不会覆盖**黑名单
+  （代码默认 + 配置追加的双重拦截始终优先）
+
 ## Payload 加密（可选）
 
 替代 TLS/wss 的 AES-256-CBC 载荷加密：
