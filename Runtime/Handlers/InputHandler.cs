@@ -30,6 +30,9 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "Optional 'button' param: 0=left (default), 1=right, 2=middle. " +
             "Uses MouseDeviceTools (Input System virtual mouse). " +
             "Works on objects receiving Input System events.")]
+        [MCPParam("x", Type = "number", Required = true, Description = "Normalized X position 0.0-1.0")]
+        [MCPParam("y", Type = "number", Required = true, Description = "Normalized Y position 0.0-1.0")]
+        [MCPParam("button", Type = "integer", Description = "0=left (default), 1=right, 2=middle")]
         public static string MouseClick(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
@@ -62,6 +65,8 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "Preserves current button states so held clicks aren't interrupted. " +
             "Typical values: (dx=50, dy=0) = look right, (dx=0, dy=-30) = look up. " +
             "Uses InputSystem.QueueStateEvent on the physical mouse device.")]
+        [MCPParam("dx", Type = "number", Required = true, Description = "Horizontal delta in pixels")]
+        [MCPParam("dy", Type = "number", Required = true, Description = "Vertical delta in pixels")]
         public static string MouseMove(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
@@ -88,6 +93,8 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "'release' = release a held key (use key='*' or omit key to release ALL keys). " +
             "Uses InputSystem.QueueStateEvent on the physical keyboard device. " +
             "Works in both Editor Play Mode and Runtime builds with Input System package.")]
+        [MCPParam("key", Type = "string", Required = true, Description = "Key name: 'w', 'space', 'enter', 'upArrow', etc.")]
+        [MCPParam("action", Type = "string", Description = "tap/hold/release (default tap)", EnumValues = new[] { "tap", "hold", "release" })]
         public static string KeyPress(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
@@ -149,6 +156,10 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "Actions: 'tap' = immediate touch+release, 'start' = begin touching, " +
             "'move' = move held finger to new position, 'end' = release finger. " +
             "For swipe/drag: call start → move (x N) → end in sequence.")]
+        [MCPParam("action", Type = "string", Required = true, Description = "tap/start/move/end", EnumValues = new[] { "tap", "start", "move", "end" })]
+        [MCPParam("x", Type = "number", Description = "Normalized X position (required for tap/start/move)")]
+        [MCPParam("y", Type = "number", Description = "Normalized Y position (required for tap/start/move)")]
+        [MCPParam("fingerId", Type = "integer", Description = "Touch finger ID (default 0)")]
         public static string Touch(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
@@ -222,6 +233,13 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "'steps' (int, optional, default 15) — number of intermediate move events. " +
             "'fingerId' (int, optional, default 0) — touch finger ID. " +
             "Returns immediately with estimated duration. Use game.wait afterwards to let it complete.")]
+        [MCPParam("startX", Type = "number", Required = true, Description = "Normalized start X 0.0-1.0")]
+        [MCPParam("startY", Type = "number", Required = true, Description = "Normalized start Y 0.0-1.0")]
+        [MCPParam("endX", Type = "number", Required = true, Description = "Normalized end X 0.0-1.0")]
+        [MCPParam("endY", Type = "number", Required = true, Description = "Normalized end Y 0.0-1.0")]
+        [MCPParam("duration", Type = "number", Description = "Swipe duration in seconds (default 0.3)")]
+        [MCPParam("steps", Type = "integer", Description = "Intermediate move events (default 15)")]
+        [MCPParam("fingerId", Type = "integer", Description = "Touch finger ID (default 0)")]
         public static string Swipe(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
@@ -274,6 +292,13 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "Button names: south/east/north/west, a/b/x/y, leftShoulder/rightShoulder, lb/rb," +
             "leftStick/rightStick, start/select/back, dpadUp/down/left/right. " +
             "Axis names: leftStickX/Y, rightStickX/Y, leftTrigger, rightTrigger.")]
+        [MCPParam("action", Type = "string", Required = true, Description = "button/axis/set/reset/state", EnumValues = new[] { "button", "axis", "set", "reset", "state" })]
+        [MCPParam("button", Type = "string", Description = "Button name (action=button), e.g. 'south'")]
+        [MCPParam("press", Type = "string", Description = "tap/press/release (action=button)", EnumValues = new[] { "tap", "press", "release" })]
+        [MCPParam("axis", Type = "string", Description = "Axis name (action=axis), e.g. 'leftStickX'")]
+        [MCPParam("value", Type = "number", Description = "Axis value -1..1 (action=axis)")]
+        [MCPParam("buttons", Type = "array", Description = "Batch buttons [{button,press}] (action=set)")]
+        [MCPParam("axes", Type = "object", Description = "Batch axes {name:value} (action=set)")]
         public static string Gamepad(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);

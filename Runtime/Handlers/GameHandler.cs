@@ -71,6 +71,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "normalized screen rect [xMin,yMin,xMax,yMax], center position, font size, " +
             "and color. Also returns screen dimensions for coordinate reference. " +
             "Ideal for reading menus, HUD values, dialogue, labels without screenshots.")]
+        [MCPParam("contains", Type = "string", Description = "Text substring filter (optional)")]
         public static string GetUITexts(string paramsJson)
         {
             try
@@ -113,6 +114,9 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "'contains' (label text contains), 'interactable' (bool). " +
             "Also returns screen dimensions. " +
             "Use the 'center' position to target clicks with input.click_screen.")]
+        [MCPParam("type", Type = "string", Description = "Element type filter, e.g. 'Button'")]
+        [MCPParam("contains", Type = "string", Description = "Label/text substring filter")]
+        [MCPParam("interactable", Type = "boolean", Description = "Filter by interactable state")]
         public static string FindUI(string paramsJson)
         {
             try
@@ -184,6 +188,9 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "Input.GetAxis when Active Input Handling is 'Both' or 'New')." +
             "For legacy-only Input Manager, use keys instead of axes." +
             "Returns list of executed actions with results.")]
+        [MCPParam("keys", Type = "array", Description = "Keys [{key, action tap/hold/release}]")]
+        [MCPParam("mouse", Type = "object", Description = "Mouse {x/y, dx/dy, scroll, buttons}")]
+        [MCPParam("axes", Type = "object", Description = "Input action name to value map")]
         public static string InputAction(string paramsJson)
         {
             try
@@ -276,6 +283,8 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "for faster response. " +
             "This is the primary perception tool — one call gives the agent 80% of what it " +
             "needs to decide the next action.")]
+        [MCPParam("includeUI", Type = "boolean", Description = "Skip UI scan when false (default true)")]
+        [MCPParam("playerPath", Type = "string", Description = "Player GameObject path for position")]
         public static string GetGameState(string paramsJson)
         {
             try
@@ -453,6 +462,15 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "  {\"type\":\"seconds\",\"value\":2.0}" +
             "  {\"type\":\"uiAppears\",\"text\":\"Continue\",\"timeout\":10}" +
             "  {\"type\":\"property\",\"path\":\"Player\",\"component\":\"Health\",\"property\":\"currentHP\",\"operator\":\"<=\",\"value\":0}")]
+        [MCPParam("type", Type = "string", Required = true, Description = "seconds/sceneLoaded/uiAppears/uiDisappears/property", EnumValues = new[] { "seconds", "sceneLoaded", "uiAppears", "uiDisappears", "property" })]
+        [MCPParam("timeout", Type = "number", Description = "Max wait seconds (default 30)")]
+        [MCPParam("value", Type = "string", Description = "seconds: float; property: target value")]
+        [MCPParam("sceneName", Type = "string", Description = "Scene name (type=sceneLoaded)")]
+        [MCPParam("text", Type = "string", Description = "UI text (type=uiAppears/uiDisappears)")]
+        [MCPParam("path", Type = "string", Description = "Object path (type=property)")]
+        [MCPParam("component", Type = "string", Description = "Component type (type=property)")]
+        [MCPParam("property", Type = "string", Description = "Property name (type=property)")]
+        [MCPParam("operator", Type = "string", Description = "==/!=/</>/<=/>= (type=property)")]
         public static string Wait(string paramsJson)
         {
             try
@@ -532,6 +550,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "Returns status: 'completed', 'waiting', 'timeout', or 'error'. " +
             "For 'waiting', also returns a 'debug' field explaining what's being waited on. " +
             "Poll at ~0.5s intervals until status is 'completed'.")]
+        [MCPParam("id", Type = "string", Required = true, Description = "Wait ID from game.wait")]
         public static string WaitCheck(string paramsJson)
         {
             try
@@ -673,6 +692,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "Use game.get_delta to poll for changes since last check. " +
             "Example: {\"signals\":[{\"id\":\"hp\",\"type\":\"property\"," +
             "\"path\":\"Player\",\"component\":\"Health\",\"property\":\"currentHP\"}]}")]
+        [MCPParam("signals", Type = "array", Required = true, Description = "Signals [{id, type, path, component, property}]")]
         public static string Watch(string paramsJson)
         {
             try
@@ -933,6 +953,8 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "Example: [{\"type\":\"key\",\"name\":\"w\",\"action\":\"hold\"}," +
             "{\"type\":\"wait\",\"duration\":0.5}," +
             "{\"type\":\"key\",\"name\":\"w\",\"action\":\"release\"}]")]
+        [MCPParam("steps", Type = "array", Required = true, Description = "Ordered action steps [{type, ...}]")]
+        [MCPParam("timeout", Type = "number", Description = "Max sequence seconds (default 30)")]
         public static string DoSequence(string paramsJson)
         {
             try
@@ -973,6 +995,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "Param: 'id' (string, required) — the sequence ID from game.do_sequence. " +
             "Returns: status (running|completed|error), step (current step index), " +
             "total (total steps), log (recent step log entries).")]
+        [MCPParam("id", Type = "string", Required = true, Description = "Sequence ID from game.do_sequence")]
         public static string SequenceStatus(string paramsJson)
         {
             try
@@ -1024,6 +1047,13 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "'typeFilter' (string, optional) — filter by component type name (e.g. 'Enemy', 'Item'). " +
             "Returns: array of nearby objects with name, instanceId, components, " +
             "position, distance, direction (normalized vector from origin), and tags.")]
+        [MCPParam("origin", Type = "object", Description = "[x,y,z] world position (object form)")]
+        [MCPParam("playerPath", Type = "string", Description = "Player path as search origin")]
+        [MCPParam("radius", Type = "number", Description = "Search radius (default 10)")]
+        [MCPParam("maxObjects", Type = "integer", Description = "Max results (default 20)")]
+        [MCPParam("tag", Type = "string", Description = "Filter by Unity tag")]
+        [MCPParam("layerName", Type = "string", Description = "Filter by layer name")]
+        [MCPParam("typeFilter", Type = "string", Description = "Filter by component type name")]
         public static string GetSpatial(string paramsJson)
         {
             try
@@ -1152,6 +1182,9 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "'text' (string, required) — the new text to set. " +
             "Fires onEndEdit after setting the value. " +
             "Returns: success, path, text.")]
+        [MCPParam("path", Type = "string", Description = "InputField transform path")]
+        [MCPParam("instanceId", Type = "integer", Description = "InputField instanceId")]
+        [MCPParam("text", Type = "string", Required = true, Description = "New text to set")]
         public static string UISetInputFieldText(string paramsJson)
         {
             try
@@ -1221,6 +1254,9 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "'value' (bool, required) — the new isOn state. " +
             "Fires onValueChanged after setting. " +
             "Returns: success, path, isOn.")]
+        [MCPParam("path", Type = "string", Description = "Toggle transform path")]
+        [MCPParam("instanceId", Type = "integer", Description = "Toggle instanceId")]
+        [MCPParam("value", Type = "boolean", Required = true, Description = "New isOn state")]
         public static string UISetToggle(string paramsJson)
         {
             try
@@ -1265,6 +1301,10 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "If false, value is used directly (clamped to slider range). " +
             "Fires onValueChanged after setting. " +
             "Returns: success, path, value, normalized.")]
+        [MCPParam("path", Type = "string", Description = "Slider transform path")]
+        [MCPParam("instanceId", Type = "integer", Description = "Slider instanceId")]
+        [MCPParam("value", Type = "number", Required = true, Description = "Slider value to set")]
+        [MCPParam("normalized", Type = "boolean", Description = "Value is 0-1 mapped to range (default true)")]
         public static string UISetSlider(string paramsJson)
         {
             try
@@ -1318,6 +1358,10 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "'option' (int, index) OR 'optionText' (string, matches label text). " +
             "Sets dropdown.value and fires onValueChanged. " +
             "Returns: success, path, selectedIndex, selectedText.")]
+        [MCPParam("path", Type = "string", Description = "Dropdown transform path")]
+        [MCPParam("instanceId", Type = "integer", Description = "Dropdown instanceId")]
+        [MCPParam("option", Type = "integer", Description = "Option index to select")]
+        [MCPParam("optionText", Type = "string", Description = "Option label text to select")]
         public static string UISelectDropdownOption(string paramsJson)
         {
             try
@@ -1363,6 +1407,10 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "'toPath' OR 'toInstanceId' (target), both required. " +
             "Uses EventSystem to fire BeginDrag, Drag (at target), and EndDrag. " +
             "Returns: success, from, to, droppedOnTarget.")]
+        [MCPParam("fromPath", Type = "string", Description = "Source UI element path")]
+        [MCPParam("fromInstanceId", Type = "integer", Description = "Source UI element instanceId")]
+        [MCPParam("toPath", Type = "string", Description = "Target UI element path")]
+        [MCPParam("toInstanceId", Type = "integer", Description = "Target UI element instanceId")]
         public static string UIDrag(string paramsJson)
         {
             try
@@ -1433,6 +1481,10 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "Fires IPointerEnterHandler on the target and scans visible text that just appeared. " +
             "Returns: success, target, tooltips (array of text entries). " +
             "Note: this fires synchronously; some tooltip systems may need a frame delay.")]
+        [MCPParam("path", Type = "string", Description = "Target UI element path")]
+        [MCPParam("instanceId", Type = "integer", Description = "Target UI element instanceId")]
+        [MCPParam("x", Type = "number", Description = "Normalized X 0-1 (screen position mode)")]
+        [MCPParam("y", Type = "number", Description = "Normalized Y 0-1 (screen position mode)")]
         public static string UIGetTooltip(string paramsJson)
         {
             try
@@ -1870,6 +1922,9 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "components (JSON array of {'type':'TypeName'} objects, optional — component type names to read properties from). " +
             "Returns: name, instanceId, path, position, rotation, velocity, animatorState, components.",
             Platform = MCPToolPlatforms.All)]
+        [MCPParam("tag", Type = "string", Description = "Player tag (default 'Player')")]
+        [MCPParam("path", Type = "string", Description = "Player path (overrides tag)")]
+        [MCPParam("components", Type = "array", Description = "Component types to read properties from")]
         public static string GetPlayer(string paramsJson)
         {
             try
@@ -2060,6 +2115,10 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "componentTypes (JSON array of type name strings, optional — default ['Health','AIController','CharacterController','Enemy','NPC']). " +
             "Returns: count, entities[] with name/instanceId/path/position/distance/direction/type/health/isAlive/tags/layer.",
             Platform = MCPToolPlatforms.All)]
+        [MCPParam("radius", Type = "number", Description = "Search radius (default 50)")]
+        [MCPParam("origin", Type = "object", Description = "[x,y,z] world position (object form)")]
+        [MCPParam("maxCount", Type = "integer", Description = "Max entities (default 30)")]
+        [MCPParam("componentTypes", Type = "array", Description = "Component type names to match")]
         public static string GetEntities(string paramsJson)
         {
             try
@@ -2237,6 +2296,10 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "layer (int, optional, default 0), component (string, optional, default 'Animator'). " +
             "Returns: layer, stateHash, normalizedTime, speed, isTransitioning, parameters[{name,type,value}].",
             Platform = MCPToolPlatforms.All)]
+        [MCPParam("instanceId", Type = "integer", Description = "Object instanceId")]
+        [MCPParam("path", Type = "string", Description = "Object transform path")]
+        [MCPParam("layer", Type = "integer", Description = "Animator layer (default 0)")]
+        [MCPParam("component", Type = "string", Description = "Animator component type (default 'Animator')")]
         public static string GetAnimatorState(string paramsJson)
         {
             try
@@ -2344,6 +2407,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "Params: value (float, required). " +
             "Returns: newTimeScale, newFixedDeltaTime.",
             Platform = MCPToolPlatforms.All)]
+        [MCPParam("value", Type = "number", Description = "Time scale 0-10 (default 1.0)")]
         public static string SetTimeScale(string paramsJson)
         {
             try

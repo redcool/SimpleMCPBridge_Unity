@@ -25,6 +25,10 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "Relative paths are rooted at: Editor → <Project>/VideoRecord/, Runtime → <temporaryCachePath>/VideoRecord/. " +
             "Returns the absolute file path of the saved screenshot.",
             Platform = MCPToolPlatforms.All)]
+        [MCPParam("savePath", Type = "string", Required = true, Description = "Relative path under VideoRecord/")]
+        [MCPParam("cameraName", Type = "string", Description = "Camera name (default 'Main Camera')")]
+        [MCPParam("width", Type = "integer", Description = "Output width px (default screen width)")]
+        [MCPParam("height", Type = "integer", Description = "Output height px (default screen height)")]
         public static string Screenshot(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);

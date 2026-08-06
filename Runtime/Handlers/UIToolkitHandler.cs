@@ -70,6 +70,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "normalized screen rect [xMin,yMin,xMax,yMax], font size, and color. " +
             "Optional filter: 'contains' (substring, case-insensitive). " +
             "Buttons are excluded — their text is covered by uitk.find.")]
+        [MCPParam("contains", Type = "string", Description = "Text substring filter")]
         public static string GetTexts(string paramsJson)
         {
             try
@@ -102,6 +103,8 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "[xMin,yMin,xMax,yMax], and center. Optional filters: 'type' (partial match, " +
             "e.g. Button/Toggle), 'contains' (substring on text/value/name). " +
             "Use 'center' with uitk.click or input.click_screen to interact.")]
+        [MCPParam("type", Type = "string", Description = "Type filter, e.g. 'Button'")]
+        [MCPParam("contains", Type = "string", Description = "Text/value/name substring filter")]
         public static string Find(string paramsJson)
         {
             try
@@ -138,6 +141,8 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "panelPath, elementCount, truncated (true when more than 500 elements — only " +
             "the first 500 are returned). Optional: 'panelIndex' (0-based, uitk.get_panels " +
             "order) or 'panelPath' (gameObjectPath from uitk.get_panels) — omit for all panels.")]
+        [MCPParam("panelIndex", Type = "integer", Description = "Panel index from uitk.get_panels")]
+        [MCPParam("panelPath", Type = "string", Description = "Panel gameObjectPath from uitk.get_panels")]
         public static string GetElements(string paramsJson)
         {
             try
@@ -179,6 +184,11 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "MouseUp events to the target element with a panel-space position inside the " +
             "panel layout, so Clickable generates the ClickEvent. Returns clickedPath and " +
             "clickedType. The panel must be attached and laid out (runtime / Play Mode).")]
+        [MCPParam("panelIndex", Type = "integer", Description = "Panel index from uitk.get_panels")]
+        [MCPParam("panelPath", Type = "string", Description = "Panel gameObjectPath from uitk.get_panels")]
+        [MCPParam("path", Type = "string", Description = "Element path (element mode)")]
+        [MCPParam("x", Type = "number", Description = "Normalized X 0-1 (coordinate mode)")]
+        [MCPParam("y", Type = "number", Description = "Normalized Y 0-1 (coordinate mode)")]
         public static string Click(string paramsJson)
         {
             try
@@ -258,6 +268,11 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "index or string choice, TextField=string). Optional 'silent' (bool, default " +
             "false): when true uses SetValueWithoutNotify so no ChangeEvent fires. " +
             "Returns success, value, silent.")]
+        [MCPParam("panelIndex", Type = "integer", Description = "Panel index from uitk.get_panels")]
+        [MCPParam("panelPath", Type = "string", Description = "Panel gameObjectPath from uitk.get_panels")]
+        [MCPParam("path", Type = "string", Required = true, Description = "Element path from uitk.get_elements")]
+        [MCPParam("value", Type = "string", Required = true, Description = "Value to set (parsed per element type)")]
+        [MCPParam("silent", Type = "boolean", Description = "SetValueWithoutNotify, no ChangeEvent (default false)")]
         public static string SetValue(string paramsJson)
         {
             try

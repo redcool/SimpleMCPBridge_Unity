@@ -16,6 +16,10 @@ namespace SimpleMCPBridge.Runtime.Handlers
         [MCPTool(MCPMethodConst.PHYSICS_RAYCAST, "Cast a ray from origin in direction and return the first hit. " +
             "Params: origin (float[3]), direction (float[3]), maxDistance (float, optional), layerMask (int, optional). " +
             "Returns hit point, normal, distance, collider info (gameObject path, instanceId).")]
+        [MCPParam("origin", Type = "array", Required = true, Description = "[x,y,z] ray origin")]
+        [MCPParam("direction", Type = "array", Required = true, Description = "[x,y,z] ray direction")]
+        [MCPParam("maxDistance", Type = "number", Description = "Max ray distance (default max)")]
+        [MCPParam("layerMask", Type = "integer", Description = "Layer mask filter (default all)")]
         public static string Raycast(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
@@ -67,6 +71,12 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "direction (float[3], required), rotation (float[4], optional — quaternion [x,y,z,w]), " +
             "maxDistance (float, optional, default 100), layerMask (int, optional, default -1). " +
             "Returns hit point, normal, distance, collider info (gameObject path, instanceId).")]
+        [MCPParam("origin", Type = "array", Required = true, Description = "[x,y,z] box origin")]
+        [MCPParam("halfExtents", Type = "array", Required = true, Description = "[x,y,z] half extents")]
+        [MCPParam("direction", Type = "array", Required = true, Description = "[x,y,z] sweep direction")]
+        [MCPParam("rotation", Type = "array", Description = "Quaternion [x,y,z,w] rotation")]
+        [MCPParam("maxDistance", Type = "number", Description = "Max sweep distance (default 100)")]
+        [MCPParam("layerMask", Type = "integer", Description = "Layer mask filter (default -1)")]
         public static string BoxCast(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
@@ -128,6 +138,11 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "direction (float[3], required), " +
             "maxDistance (float, optional, default 100), layerMask (int, optional, default -1). " +
             "Returns hit point, normal, distance, collider info (gameObject path, instanceId).")]
+        [MCPParam("origin", Type = "array", Required = true, Description = "[x,y,z] sphere origin")]
+        [MCPParam("radius", Type = "number", Required = true, Description = "Sphere radius")]
+        [MCPParam("direction", Type = "array", Required = true, Description = "[x,y,z] sweep direction")]
+        [MCPParam("maxDistance", Type = "number", Description = "Max sweep distance (default 100)")]
+        [MCPParam("layerMask", Type = "integer", Description = "Layer mask filter (default -1)")]
         public static string SphereCast(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
@@ -182,6 +197,9 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "Params: center (float[3], required), radius (float, required), " +
             "layerMask (int, optional, default -1). " +
             "Returns: success, count, and array of collider info (name, instanceId, path, position, tag, layer).")]
+        [MCPParam("center", Type = "array", Required = true, Description = "[x,y,z] sphere center")]
+        [MCPParam("radius", Type = "number", Required = true, Description = "Sphere radius")]
+        [MCPParam("layerMask", Type = "integer", Description = "Layer mask filter (default -1)")]
         public static string OverlapSphere(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
@@ -230,6 +248,10 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "rotation (float[4], optional — quaternion [x,y,z,w], default identity), " +
             "layerMask (int, optional, default -1). " +
             "Returns: success, count, and array of collider info (name, instanceId, path, position, tag, layer).")]
+        [MCPParam("center", Type = "array", Required = true, Description = "[x,y,z] box center")]
+        [MCPParam("halfExtents", Type = "array", Required = true, Description = "[x,y,z] half extents")]
+        [MCPParam("rotation", Type = "array", Description = "Quaternion [x,y,z,w] rotation")]
+        [MCPParam("layerMask", Type = "integer", Description = "Layer mask filter (default -1)")]
         public static string OverlapBox(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);

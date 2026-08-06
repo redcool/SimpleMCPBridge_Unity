@@ -69,5 +69,37 @@ namespace SimpleMCPBridge.Runtime
     public class MCPToolClassAttribute : Attribute
     {
     }
+
+    /// <summary>
+    /// Declares one parameter of an [MCPTool] method as JSON Schema metadata.
+    /// Attach one attribute per documented parameter (AllowMultiple). Emitted as the
+    /// tool's "inputSchema" in register_tools so agents see real parameter schemas
+    /// instead of only free-text descriptions.
+    ///
+    /// Usage:
+    /// [MCPTool("scene.set_transform", "...")]
+    /// [MCPParam("instanceId", Type = "integer", Required = true, Description = "Target object")]
+    /// [MCPParam("position", Type = "array", Description = "[x,y,z]")]
+    /// [MCPParam("space", Type = "string", EnumValues = new[] { "Self", "World" })]
+    /// public static string SetTransform(string paramsJson) { … }
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
+    public sealed class MCPParamAttribute : Attribute
+    {
+        public string Name { get; }
+        /// <summary>JSON Schema type: "string" | "number" | "integer" | "boolean" | "array" | "object".</summary>
+        public string Type { get; set; }        // defaults to "string" when left empty at emission
+        /// <summary>Whether the parameter is required (emitted in the schema "required" array).</summary>
+        public bool Required { get; set; }      // default false
+        /// <summary>Human-readable description (emitted as the property "description").</summary>
+        public string Description { get; set; } // default ""
+        /// <summary>Optional allowed values, emitted as the property JSON "enum" array.</summary>
+        public string[] EnumValues { get; set; } // optional, emitted as JSON "enum" array
+
+        public MCPParamAttribute(string name)
+        {
+            Name = name;
+        }
+    }
 }
 // mcp-revision: 181632

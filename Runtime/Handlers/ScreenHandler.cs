@@ -23,6 +23,10 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "Works without Input System package — uses only built-in UnityEngine.EventSystems. " +
             "Optional 'layer' param (int layer index or string layer name) enables 3D Physics raycast " +
             "against that layer, returning 3D collider hits and executing click handlers on them.")]
+        [MCPParam("x", Type = "number", Required = true, Description = "Normalized X position 0.0-1.0")]
+        [MCPParam("y", Type = "number", Required = true, Description = "Normalized Y position 0.0-1.0")]
+        [MCPParam("layer", Type = "string", Description = "3D layer index or name, or 'All' for 3D raycast")]
+        [MCPParam("maxDistance", Type = "number", Description = "Max 3D raycast distance (default max)")]
         public static string ClickScreen(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);

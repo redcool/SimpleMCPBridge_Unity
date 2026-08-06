@@ -174,8 +174,57 @@ namespace SimpleMCPBridge.Runtime
 
             var del = (Func<string, string>)method.CreateDelegate(typeof(Func<string, string>));
 
-            _tools[name] = new ToolEntry(name, description, del, requirePlayMode, category);
+            // Build the inputSchema JSON fragment ONCE here (from [MCPParam] attributes)
+            // and store it in the ToolEntry — never rebuilt inside ToJson on every call.
+            var paramAttrs = method.GetCustomAttributes(typeof(MCPParamAttribute), false)
+                .Cast<MCPParamAttribute>()
+                .ToArray();
+            var inputSchema = BuildInputSchema(paramAttrs);
+
+            _tools[name] = new ToolEntry(name, description, del, requirePlayMode, category, inputSchema);
             DebugUtils.Log($"[MCPToolRegistry] Registered '{method.DeclaringType?.Name}.{method.Name}' as '{name}' [{category}]");
+        }
+
+        /// <summary>
+        /// Build the JSON Schema "inputSchema" fragment for a tool from its [MCPParam]
+        /// attributes. Tools without any [MCPParam] emit the exact legacy wire format
+        /// {"type":"object","properties":{}} — no "required" key, byte-identical to the
+        /// pre-schema output. Shape (when params exist):
+        ///   {"type":"object","properties":{"&lt;name&gt;":{"type":"&lt;type&gt;","description":"&lt;desc&gt;",...},...},"required":["&lt;req&gt;",...]}
+        /// "required" is only included when at least one param has Required=true;
+        /// "enum" is only included when EnumValues is non-empty.
+        /// </summary>
+        private static string BuildInputSchema(MCPParamAttribute[] paramAttrs)
+        {
+            if (paramAttrs == null || paramAttrs.Length == 0)
+                return "{\"type\":\"object\",\"properties\":{}}";
+
+            var props = new List<string>();
+            var required = new List<string>();
+
+            foreach (var p in paramAttrs)
+            {
+                var propFields = new List<string>
+                {
+                    $"\"type\":{JsonHelper.EscapeString(string.IsNullOrEmpty(p.Type) ? "string" : p.Type)}",
+                    $"\"description\":{JsonHelper.EscapeString(p.Description)}"
+                };
+
+                if (p.EnumValues != null && p.EnumValues.Length > 0)
+                {
+                    propFields.Add(
+                        $"\"enum\":{JsonHelper.BuildJsonArray(p.EnumValues.Select(v => JsonHelper.EscapeString(v)).ToArray())}");
+                }
+
+                props.Add($"{JsonHelper.EscapeString(p.Name)}:{{{string.Join(",", propFields)}}}");
+
+                if (p.Required)
+                    required.Add(JsonHelper.EscapeString(p.Name));
+            }
+
+            var propsJson = string.Join(",", props);
+            var requiredJson = required.Count > 0 ? $",\"required\":[{string.Join(",", required)}]" : "";
+            return $"{{\"type\":\"object\",\"properties\":{{{propsJson}}}}}{requiredJson}";
         }
 
         /// <summary>
@@ -323,14 +372,16 @@ namespace SimpleMCPBridge.Runtime
             public Func<string, string> Delegate { get; }
             public bool RequirePlayMode { get; }
             public string Category { get; }
+            public string InputSchema { get; }
 
-            public ToolEntry(string name, string description, Func<string, string> del, bool requirePlayMode, string category)
+            public ToolEntry(string name, string description, Func<string, string> del, bool requirePlayMode, string category, string inputSchema)
             {
                 Name = name;
                 Description = description;
                 Delegate = del;
                 RequirePlayMode = requirePlayMode;
                 Category = category;
+                InputSchema = inputSchema;
             }
 
             public string ToJson()
@@ -340,8 +391,9 @@ namespace SimpleMCPBridge.Runtime
                 var desc = string.IsNullOrEmpty(Category)
                     ? Description
                     : $"[{Category}] {Description}";
-                // params are embedded in paramsJson, so properties stays empty
-                return $@"{{""name"":{JsonHelper.EscapeString(Name)},""description"":{JsonHelper.EscapeString(desc)},""inputSchema"":{{""type"":""object"",""properties"":{{}}}}}}";
+                // inputSchema was built once at registration time from [MCPParam] attributes.
+                // Tools without params carry the exact legacy {"type":"object","properties":{}}.
+                return $@"{{""name"":{JsonHelper.EscapeString(Name)},""description"":{JsonHelper.EscapeString(desc)},""inputSchema"":{InputSchema}}}";
             }
         }
     }

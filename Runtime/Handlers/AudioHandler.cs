@@ -19,6 +19,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "Returns each source with: clipName, volume, isPlaying, time, length, loop, " +
             "spatialBlend, position, distanceFromListener, path, instanceId. " +
             "Also returns the AudioListener position for reference.")]
+        [MCPParam("maxResults", Type = "integer", Description = "Max sources to return (default 50, max 200)")]
         public static string GetSources(string paramsJson)
         {
             try

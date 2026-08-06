@@ -46,6 +46,9 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "Params: position (float[3], required), " +
             "maxDistance (float, optional, default 2.0), areaMask (int, optional, default -1 = all areas). " +
             "Returns: success, hit (bool), position (snapped [x,y,z]), distance (float), areaIndex (int).")]
+        [MCPParam("position", Type = "array", Required = true, Description = "[x,y,z] position to snap")]
+        [MCPParam("maxDistance", Type = "number", Description = "Search radius (default 2.0)")]
+        [MCPParam("areaMask", Type = "integer", Description = "NavMesh area mask (default all)")]
         public static string SamplePosition(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
@@ -94,6 +97,10 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "snapDistance (float, optional, default 2.0). " +
             "Returns: success, reachable (bool), status (PathComplete/PathPartial/PathInvalid), " +
             "waypointCount, waypoints ([x,y,z],...), startSnapped, endSnapped, distance (total path length).")]
+        [MCPParam("start", Type = "array", Required = true, Description = "[x,y,z] path start point")]
+        [MCPParam("end", Type = "array", Required = true, Description = "[x,y,z] path end point")]
+        [MCPParam("areaMask", Type = "integer", Description = "NavMesh area mask (default all)")]
+        [MCPParam("snapDistance", Type = "number", Description = "Snap radius (default 2.0)")]
         public static string QueryPath(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
@@ -189,6 +196,11 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "agentInstanceId (int, optional) — which NavMeshAgent to move (default: player's). " +
             "Returns: pathStatus (Complete/Partial/Invalid), pathPending (bool), distance (float), corners (int).",
             Platform = MCPToolPlatforms.All)]
+        [MCPParam("position", Type = "array", Description = "[x,y,z] destination position")]
+        [MCPParam("targetInstanceId", Type = "integer", Description = "Target object instanceId")]
+        [MCPParam("targetPath", Type = "string", Description = "Target object transform path")]
+        [MCPParam("stopDistance", Type = "number", Description = "Stop distance (default 1.0)")]
+        [MCPParam("agentInstanceId", Type = "integer", Description = "NavMeshAgent instanceId (default player)")]
         public static string MoveTo(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
