@@ -53,6 +53,20 @@ namespace SimpleMCPBridge.Runtime.Handlers
         private static readonly Dictionary<string, string> _watchBaselines = new();
         private const int MaxWatchEntries = 100;
 
+        // Cached reflection targets per watch signal, keyed by "path|component|property".
+        // Avoids GameObject.Find (full linear scene scan) + GetProperty/GetField on every
+        // tick — the resolved Component + Member are reused until the reference is
+        // null/destroyed (Unity's overloaded == treats destroyed objects as null),
+        // at which point the next read re-resolves from the scene.
+        private static readonly Dictionary<string, WatchPropertyCache> _watchPropertyCache = new();
+        private const int MaxWatchPropertyCacheEntries = MaxWatchEntries * 2;
+
+        private class WatchPropertyCache
+        {
+            public Component Component;
+            public MemberInfo Member; // PropertyInfo or FieldInfo
+        }
+
         // Continuous monitoring: Unity side polls watched signals every N frames and
         // accumulates changes into a cache. game.get_delta then just reads (and clears)
         // the cache instead of doing reflection reads on every call.
@@ -757,6 +771,11 @@ namespace SimpleMCPBridge.Runtime.Handlers
                             _watchConfigs.Remove(oldestKey);
                             _watchBaselines.Remove(oldestKey);
                         }
+                        // Bound the reflection cache — stale entries from removed watches
+                        // are cleared wholesale once it outgrows the live set (re-resolve
+                        // on next tick is cheap and self-healing).
+                        if (_watchPropertyCache.Count > MaxWatchPropertyCacheEntries)
+                            _watchPropertyCache.Clear();
                     }
                 }
 
@@ -895,10 +914,18 @@ namespace SimpleMCPBridge.Runtime.Handlers
                 _watchConfigs.Remove(key);
                 _watchBaselines.Remove(key);
             }
+            // Bound the reflection cache alongside stale/evicted watches.
+            if (_watchPropertyCache.Count > MaxWatchPropertyCacheEntries)
+                _watchPropertyCache.Clear();
         }
 
         /// <summary>
         /// Read a component property/field value by path. Returns "" on error with message in out param.
+        /// Caches the resolved Component + MemberInfo per (path|component|property) so the
+        /// per-tick poll skips GameObject.Find (full scene scan) + reflection lookup. The cache
+        /// is re-resolved ONLY when the cached component is null/destroyed (Unity fake-null);
+        /// destroyed objects are handled gracefully — re-resolve once, report "not found"
+        /// (which marks the watch stale upstream), never throw.
         /// </summary>
         private static string ReadPropertyValue(string objectPath, string componentType,
             string propertyName, out string error)
@@ -906,29 +933,50 @@ namespace SimpleMCPBridge.Runtime.Handlers
             error = null;
             try
             {
-                var go = GameObject.Find(objectPath);
-                if (go == null) { error = $"Object '{objectPath}' not found"; return ""; }
+                var cacheKey = objectPath + "|" + componentType + "|" + propertyName;
+                if (!_watchPropertyCache.TryGetValue(cacheKey, out var cache))
+                {
+                    cache = new WatchPropertyCache();
+                    _watchPropertyCache[cacheKey] = cache;
+                }
 
-                var comp = go.GetComponent(componentType);
-                if (comp == null) { error = $"Component '{componentType}' not found on '{objectPath}'"; return ""; }
+                // Re-resolve only when the cached reference is null or destroyed.
+                if (cache.Component == null)
+                {
+                    var go = GameObject.Find(objectPath);
+                    if (go == null) { error = $"Object '{objectPath}' not found"; return ""; }
+
+                    cache.Component = go.GetComponent(componentType);
+                    if (cache.Component == null) { error = $"Component '{componentType}' not found on '{objectPath}'"; return ""; }
+
+                    // Re-resolve the member too — the object at this path may have
+                    // respawned as a different type.
+                    cache.Member = ResolvePropertyOrField(cache.Component.GetType(), propertyName);
+                }
+
+                if (cache.Member == null)
+                {
+                    error = $"Property/field '{propertyName}' not found on '{componentType}'";
+                    return "";
+                }
 
                 // Try property first, then field
-                var prop = comp.GetType().GetProperty(propertyName);
-                if (prop != null)
-                    return prop.GetValue(comp)?.ToString() ?? "null";
-
-                var field = comp.GetType().GetField(propertyName);
-                if (field != null)
-                    return field.GetValue(comp)?.ToString() ?? "null";
-
-                error = $"Property/field '{propertyName}' not found on '{componentType}'";
-                return "";
+                if (cache.Member is PropertyInfo prop)
+                    return prop.GetValue(cache.Component)?.ToString() ?? "null";
+                return ((FieldInfo)cache.Member).GetValue(cache.Component)?.ToString() ?? "null";
             }
             catch (Exception ex)
             {
                 error = ex.Message;
                 return "";
             }
+        }
+
+        private static MemberInfo ResolvePropertyOrField(Type type, string name)
+        {
+            var prop = type.GetProperty(name);
+            if (prop != null) return prop;
+            return type.GetField(name);
         }
 
         // ══════════════════════════════════════════════════════════════

@@ -29,10 +29,14 @@ namespace SimpleMCPBridge.Runtime.Handlers
     {
         /// <summary>
         /// Cache for instanceId → GameObject lookups.
+        /// Bounded (512): attacker-controlled instanceIds feed it via full-scene rebuilds;
+        /// on overflow the cache is cleared (next miss rebuilds) to bound steady-state memory.
         /// </summary>
         private static readonly Dictionary<int, GameObject> s_instanceIdCache = new();
         /// <summary>
         /// Cache for component type name → Type lookups (avoids repetitive assembly iteration).
+        /// Bounded (256): attacker-controlled type names feed it via full AppDomain scans;
+        /// on overflow the cache is cleared to bound steady-state memory.
         /// </summary>
         private static readonly Dictionary<string, Type> _typeCache = new();
 
@@ -997,6 +1001,109 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
 #endif
 
+        [MCPTool(MCPMethodConst.SCENE_LOAD_SCENE, "Load a scene. In the Editor outside Play Mode this opens the scene asset; " +
+            "otherwise it loads via SceneManager (works in Play Mode and built players). " +
+            "Params: sceneName (required — scene name, or 'Assets/...unity' path), " +
+            "mode ('single' | 'additive', default 'single'), async (bool, optional). " +
+            "⚠ WARNING: after a scene load ALL previous instanceIds go stale — re-fetch scene.get_hierarchy.")]
+        [MCPParam("sceneName", Type = "string", Required = true, Description = "Scene name, or 'Assets/...unity' path")]
+        [MCPParam("mode", Type = "string", Description = "'single' (default) or 'additive'")]
+        [MCPParam("async", Type = "boolean", Description = "Load asynchronously (default false)")]
+        public static string LoadScene(string paramsJson)
+        {
+            var args = ParseJsonObject(paramsJson);
+            var sceneName = GetRequiredString(args, "sceneName");
+            var modeStr = GetString(args, "mode", "single");
+            var isAdditive = modeStr.Equals("additive", StringComparison.OrdinalIgnoreCase);
+            var isAsync = GetOptionalBool(args, "async") ?? false;
+
+            const string warning = "Scene loaded — ALL previous instanceIds are stale. Re-fetch scene.get_hierarchy.";
+
+#if UNITY_EDITOR
+            // Editor, not in Play Mode → open the scene asset directly (no play session).
+            if (!Application.isPlaying)
+            {
+                var resolvedPath = ResolveScenePath(sceneName);
+                if (string.IsNullOrEmpty(resolvedPath))
+                    return ErrorJson($"Scene '{sceneName}' not found in project");
+                UnityEditor.SceneManagement.EditorSceneManager.OpenScene(
+                    resolvedPath,
+                    isAdditive
+                        ? UnityEditor.SceneManagement.OpenSceneMode.Additive
+                        : UnityEditor.SceneManagement.OpenSceneMode.Single);
+                return JsonHelper.BuildJsonObject(
+                    ("success", "true"),
+                    ("mode", JsonHelper.EscapeString(isAdditive ? "additive" : "single")),
+                    ("name", JsonHelper.EscapeString(sceneName)),
+                    ("warning", JsonHelper.EscapeString(warning))
+                );
+            }
+#endif
+
+            // Play Mode / player → runtime load. By-name loads only resolve for scenes in
+            // Build Settings; additive loads of non-build scenes are resolved name→path first.
+            var loadName = sceneName;
+            if (isAdditive && !sceneName.Contains("/"))
+            {
+                var resolved = ResolveScenePath(sceneName);
+                if (!string.IsNullOrEmpty(resolved))
+                    loadName = resolved;
+            }
+
+            var loadMode = isAdditive ? SceneManagement.LoadSceneMode.Additive : SceneManagement.LoadSceneMode.Single;
+            if (isAsync)
+                SceneManagement.SceneManager.LoadSceneAsync(loadName, loadMode);
+            else
+                SceneManagement.SceneManager.LoadScene(loadName, loadMode);
+
+            return JsonHelper.BuildJsonObject(
+                ("success", "true"),
+                ("mode", JsonHelper.EscapeString(isAdditive ? "additive" : "single")),
+                ("name", JsonHelper.EscapeString(sceneName)),
+                ("warning", JsonHelper.EscapeString(warning))
+            );
+        }
+
+        /// <summary>
+        /// Resolve a scene name to its "Assets/...unity" path. Checks Build Settings
+        /// first (works in players too), then AssetDatabase by name (Editor only).
+        /// </summary>
+        private static string ResolveScenePath(string sceneName)
+        {
+            if (string.IsNullOrEmpty(sceneName)) return null;
+
+            // Path input ("Assets/.../X.unity") — validate directly, don't mangle it into a
+            // name filter (AssetDatabase.FindAssets matches names, never full paths).
+            if (sceneName.Contains("/") || sceneName.EndsWith(".unity", StringComparison.OrdinalIgnoreCase))
+            {
+#if UNITY_EDITOR
+                if (UnityEditor.AssetDatabase.LoadAssetAtPath<UnityEditor.SceneAsset>(sceneName) != null)
+                    return sceneName;
+#endif
+                // Player: SceneManager.LoadScene accepts build-settings paths — match below.
+            }
+
+            for (var i = 0; i < SceneManagement.SceneManager.sceneCountInBuildSettings; i++)
+            {
+                var p = SceneManagement.SceneUtility.GetScenePathByBuildIndex(i);
+                if (System.IO.Path.GetFileNameWithoutExtension(p).Equals(sceneName, StringComparison.OrdinalIgnoreCase) ||
+                    p.Equals(sceneName, StringComparison.OrdinalIgnoreCase))
+                    return p;
+            }
+
+#if UNITY_EDITOR
+            var nameOnly = System.IO.Path.GetFileNameWithoutExtension(sceneName);
+            var guids = UnityEditor.AssetDatabase.FindAssets($"t:SceneAsset {nameOnly}");
+            foreach (var guid in guids)
+            {
+                var p = UnityEditor.AssetDatabase.GUIDToAssetPath(guid);
+                if (System.IO.Path.GetFileNameWithoutExtension(p).Equals(nameOnly, StringComparison.OrdinalIgnoreCase))
+                    return p;
+            }
+#endif
+            return null;
+        }
+
         // ──────────────────────────────────────────────
         //  Object resolution
         // ──────────────────────────────────────────────
@@ -1063,6 +1170,12 @@ namespace SimpleMCPBridge.Runtime.Handlers
                 s_instanceIdCache[obj.GetInstanceID()] = obj;
             }
 
+            // Bound steady-state memory: attacker-controlled instanceId misses trigger
+            // rebuilds; if the scene has more than 512 objects, drop the cache so it can
+            // never exceed the cap (next miss simply rebuilds again).
+            if (s_instanceIdCache.Count > 512)
+                s_instanceIdCache.Clear();
+
             s_instanceIdCache.TryGetValue(instanceId, out go);
             return go;
         }
@@ -1102,6 +1215,17 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
 
         /// <summary>
+        /// Insert into _typeCache with a size cap (256). On overflow the whole cache is
+        /// cleared — simple, avoids eviction bookkeeping; a miss simply rebuilds one entry.
+        /// </summary>
+        private static void CacheType(string typeName, Type type)
+        {
+            if (_typeCache.Count >= 256)
+                _typeCache.Clear();
+            _typeCache[typeName] = type;
+        }
+
+        /// <summary>
         /// Find a Component type by name using a static cache to avoid iterating
         /// all assemblies on every call. Falls back to ResolveComponentType for
         /// Unity-internal types (UI, TMPro, Physics, etc.).
@@ -1118,7 +1242,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             var resolved = ResolveComponentType(typeName);
             if (resolved != null)
             {
-                _typeCache[typeName] = resolved;
+                CacheType(typeName, resolved);
                 return resolved;
             }
 
@@ -1140,13 +1264,13 @@ namespace SimpleMCPBridge.Runtime.Handlers
                     if (type == null) continue;
                     if (type.Name == typeName && type.IsSubclassOf(typeof(Component)) && !type.IsAbstract)
                     {
-                        _typeCache[typeName] = type;
+                        CacheType(typeName, type);
                         return type;
                     }
                 }
             }
 
-            _typeCache[typeName] = null;
+            CacheType(typeName, null);
             return null;
         }
 
@@ -1216,6 +1340,27 @@ namespace SimpleMCPBridge.Runtime.Handlers
             if (parent != null) go.transform.SetParent(parent.transform);
 
             return JsonUtility.ToJson(UnityObjectRef.FromGameObject(go));
+        }
+
+        [MCPTool(MCPMethodConst.SCENE_SAVE_PREFAB, "Save a GameObject (by instanceId or path) as a prefab asset. " +
+            "Overwrites the prefab at assetPath if it exists. " +
+            "NOTE: PrefabUtility/AssetDatabase operations are NOT Undo-trackable.")]
+        [MCPParam("instanceId", Type = "integer", Description = "Object instanceId (fast lookup)")]
+        [MCPParam("path", Type = "string", Description = "Transform path, e.g. 'Canvas/Panel/Button'")]
+        [MCPParam("assetPath", Type = "string", Required = true, Description = "Prefab asset path, e.g. 'Assets/Prefabs/X.prefab'")]
+        public static string SavePrefab(string paramsJson)
+        {
+            var args = ParseJsonObject(paramsJson);
+            var go = ResolveTarget(args);
+            if (go == null)
+                return ErrorJson("Object not found. Provide 'instanceId' or 'path'.");
+
+            var assetPath = GetRequiredString(args, "assetPath");
+            UnityEditor.PrefabUtility.SaveAsPrefabAsset(go, assetPath, out var success);
+            return JsonHelper.BuildJsonObject(
+                ("success", success ? "true" : "false"),
+                ("assetPath", JsonHelper.EscapeString(assetPath))
+            );
         }
 
         [MCPTool(MCPMethodConst.SET_MATERIAL, "⚠ Set material color and/or main texture on a Renderer (by instanceId or path). For asset-level material edits, prefer editing .meta GUIDs via filesystem — faster.")]

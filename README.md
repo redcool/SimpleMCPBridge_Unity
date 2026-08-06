@@ -188,9 +188,9 @@ Bridge 生命周期独立于窗口：关闭窗口后 bridge 继续运行，进�
 
 解析优先级：`instanceId` > `path`。两个都传时先试 instanceId，找不到再 fallback 路径。
 
-## 可用工具（共 101+ 个）
+## 可用工具（共 117 个）
 
-### 场景工具（SceneHandler，17 All + 9 Editor = 26 工具）
+### 场景工具（SceneHandler，18 All + 10 Editor = 28 工具）
 
 | 工具 | 平台 | 参数 | 说明 |
 |------|------|------|------|
@@ -218,6 +218,8 @@ Bridge 生命周期独立于窗口：关闭窗口后 bridge 继续运行，进�
 | `scene.save_current` | Editor | `savePath`(可选) | 保存当前场景。savePath 不传则覆盖保存；未命名场景 savePath 为必填 |
 | `scene.instantiate_prefab` | Editor | `assetPath`(必填), `position`[3], `rotation`[3], `scale`[3], `parentId`/`parentPath` | 从项目 Assets 路径实例化预制体到场景 |
 | `scene.set_material` ⚠ | Editor | `instanceId`/`path`, `materialIndex`(默认0), `color`[3或4], `texturePath` | 修改 Renderer 材质的颜色或主纹理。资产级材质修改建议直接改 .meta GUID |
+| `scene.load_scene` | All | `sceneName`(必填), `mode`(single\|additive), `async` | 加载场景。Editor 非 Play Mode 时打开场景资产；其余经 SceneManager（Play/built 均可用）。⚠ 加载后所有 instanceId 失效，需重新获取层级 |
+| `scene.save_prefab` | Editor | `instanceId`/`path`, `assetPath`(必填) | 将 GameObject 保存为预制体资产（已存在则覆盖）。PrefabUtility 操作不可撤销 |
 
 ### 编辑器工具（EditorHandler，7 工具）
 
@@ -277,6 +279,12 @@ Quality → Bitrate 映射：
 | 工具 | 参数 | 说明 |
 |------|------|------|
 | `input.click_screen` | `x`(必填,0-1), `y`(必填,0-1) | 在归一化屏幕坐标模拟用户点击。经过完整 EventSystem 事件管线：RaycastAll → PointerDown → PointerUp → PointerClick。返回 hit 列表和实际点击对象。需要场景中有活动的 EventSystem（Play Mode 或 Runtime）。**不依赖 Input System**，只使用 Unity 内置 UnityEngine.EventSystems |
+
+### 城堡点击工具（BuildingHandler，1 工具，项目特定）
+
+| 工具 | 参数 | 说明 |
+|------|------|------|
+| `castle.click_building` ⚠ | `x`(必填,0-1), `y`(必填,0-1) | 在归一化屏幕坐标点击 3D 城堡建筑（Physics.Raycast 层 20+22 + Lua FakeHitResultEvent）。**项目特定工具**——通用工程无此需求时可 `tools.disable` 忽略 |
 
 ### 输入模拟工具（InputHandler，7 工具，需 Input System 包）
 
@@ -340,7 +348,7 @@ SimpleMCPBridge 侧已配好：asmdef `versionDefines`（`com.tasharen.ngui` →
 | `ngui.find` | `type`(UIButton/UIToggle/UISlider/UIInput), `contains`(文本包含), `interactable`(bool) | 查找可交互 NGUI 元素及屏幕位置和状态。每个元素返回：type、path、label/text、interactable、归一化屏幕矩形、中心点。用 center 配合 input.click_screen 点击 |
 | `ngui.find_widgets` | `type`(widget 类型名如 UITexture/UISprite/UILabel), `contains`(名称或文本包含) | 查找所有 NGUI UIWidget（UITexture/UISprite/UILabel 等）及屏幕位置。每个元素返回：type、name、path、instanceId、归一化屏幕矩形、中心点；UILabel 额外含 text/fontSize/alignment/color。定位纯显示元素（如背景图）用此工具 |
 
-### UI Toolkit 分析工具（UIToolkitHandler，6 工具）— 独立工具集
+### UI Toolkit 分析工具（UIToolkitHandler，8 工具）— 独立工具集
 
 > 针对使用 **UI Toolkit**（`UnityEngine.UIElements`，UXML/USS/UIDocument）构建运行时 UI 的项目。
 > 与 uGUI（类别 `Ui`）和 NGUI（类别 `Ngui`）**互相独立、互不互斥**，类别 `Uitk`。
@@ -364,6 +372,8 @@ SimpleMCPBridge 侧已配好：asmdef `versionDefines`（`com.tasharen.ngui` →
 | `uitk.get_elements` | `panelIndex`/`panelPath`(可选，默认全部) | 导出 UITK 视觉树。每个元素返回：name、typeName、fullPath、classes、enabled、visible、text/value、归一化矩形。单面板超 500 元素截断（truncated:true） |
 | `uitk.click` | `panelIndex`/`panelPath` + `path`（元素模式）或 `x`,`y` 归一化坐标（坐标模式） | 点击 UITK 元素。元素模式：在 `el.worldBound.center` 派发 pooled MouseDown+MouseUp（`GetPooled(Event)`，Clickable 生成 ClickEvent）；坐标模式：归一化坐标映射到 `root.worldBound`（与 uitk.find/get_elements 的 normalizedRect 同原点，左上角）+ `panel.Pick` 命中检查。需面板已 attach 且已布局（运行态） |
 | `uitk.set_value` | `panelIndex`/`panelPath` + `path` + `value`, `silent`(可选) | 设置元素值。Toggle=bool、Slider=float、SliderInt=int、DropdownField=索引或选项文本、TextField=string。默认 `value=X` 触发 ChangeEvent 生效；`silent=true` 用 SetValueWithoutNotify 静默 |
+| `uitk.create_element` | `panelIndex`/`panelPath` + `type`(Button/Label/Slider/Toggle), `parent`(可选), `name`(可选), `text`(可选) | 运行时创建 UITK 元素并加入面板视觉树。⚠ **不持久**——面板刷新/UXML 重新应用即销毁。返回新元素路径 |
+| `uitk.remove_element` | `panelIndex`/`panelPath` + `path`(必填) | 从面板视觉树移除元素。⚠ **不持久**——面板刷新即恢复。返回被移除路径及原父路径 |
 
 ### 统一输入工具（GameHandler，1 工具）
 
@@ -390,13 +400,29 @@ SimpleMCPBridge 侧已配好：asmdef `versionDefines`（`com.tasharen.ngui` →
 | `game.wait_check` | `id`(必填) | 轮询 game.wait 的完成状态。返回 status：`completed`/`waiting`/`timeout`/`error` |
 | `game.batch` | `calls`[](必填) | 在单个 Unity 帧内批量执行多个工具调用。calls 为 `{name, arguments}` 数组，最多 50 个。返回 `{count, results: [{name, result}]}`。将 N+1 次 round trip 降为 1 次 |
 
-### 资源工具（AssetHandler，3 工具）
+### 资源工具（AssetHandler，8 工具）
 
 | 工具 | 平台 | 参数 | 说明 |
 |------|------|------|------|
 | `asset.refresh` | All | — | 刷新 Unity 资产数据库以导入新文件或检测变更。如果导入了新脚本，将触发 domain reload 且 MCP 连接会断开。客户端应轮询 /health 直到 bridgeConnected=true 确认完成 |
 | `asset.find_assets` | Editor | `nameContains`(可选), `typeFilter`(可选) | 按名称和/或类型搜索 Assets。typeFilter：Unity 资源类型名如 'Prefab'、'Material'、'Texture'、'Scene'。返回 `{filter, count, assets: [{path, name, type, guid}]}` |
 | `asset.find_references` | All | `assetPath`(必填) | 查找引用指定资源的所有资源。通过扫描文件内容中的目标 GUID 实现。可靠但较慢——扫描 Assets/ 下所有文本资源文件。返回引用者数组及 GUID |
+| `asset.create` | Editor | `type`(folder\|material), `name`, `path`, `color`[3或4](可选) | 创建资源。folder：新建文件夹；material：新建材质（可选颜色）。AssetDatabase 操作不可撤销 |
+| `asset.delete` | Editor | `assetPath`(必填), `force`(bool) | 删除资源。默认先做 find_references GUID 引用预检——有引用时返回错误（列出引用数+首个引用者），`force=true` 跳过预检 |
+| `asset.rename` | Editor | `assetPath`(必填), `newName`(必填,不含扩展名) | 重命名资源，返回新路径。AssetDatabase 操作不可撤销 |
+| `asset.move` | Editor | `assetPath`(必填), `newPath`(必填) | 移动（或改父级）资源到新路径。返回旧+新路径 |
+| `asset.build_bundle` | Editor | `shaderPaths`[](必填), `fileName`(可选), `buildTarget`(可选) | 构建 Shader AssetBundle 并上传到服务器，返回手机可达的 abUrl 供 shader.hot_replace 使用 |
+
+### PlayerPrefs 工具（PlayerPrefsHandler，4 工具）
+
+> Unity 没有 PlayerPrefs key 枚举 API——`playerprefs.get_all` 只能列出**本会话**经 set/get 见过的 key（其他代码写入的持久 key 无法枚举，用 `playerprefs.get` 精确读取）。
+
+| 工具 | 参数 | 说明 |
+|------|------|------|
+| `playerprefs.get_all` | — | 获取本会话已知的所有 PlayerPrefs。每条含 `key`、`type`（int/float/string 类型嗅探）、`value` |
+| `playerprefs.get` | `key`(必填), `keyType`(int/float/string, 可选) | 读取单个 key。keyType 省略时按 sentinel 默认值嗅探类型（int→float→string 顺序） |
+| `playerprefs.set` | `key`(必填), `value`(必填), `valueType`(可选), `save`(默认true) | 设置 key。valueType 省略时按 JSON 值类型推断（int/float/string）；save=true 时 PlayerPrefs.Save() |
+| `playerprefs.delete` | `key`(必填) | 删除单个 key 并保存 |
 
 ### 物理工具（PhysicsHandler，5 工具）
 

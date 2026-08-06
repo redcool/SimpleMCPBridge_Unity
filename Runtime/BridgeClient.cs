@@ -25,8 +25,10 @@ namespace SimpleMCPBridge.Runtime
     public class BridgeClient
     {
         // ── Constants ──
-        private const int LogPreviewLength = 80;
-        private const int ResponseLogLength = 100;
+        // Max queued main-thread actions drained per frame. A burst of queued
+        // messages (e.g. a flood of tool responses) must not freeze the Unity
+        // main thread — the remainder stay in the queue and drain on later frames.
+        private const int MaxActionsPerFrame = 12;
 
         
         private IWebSocketClient _client;
@@ -205,12 +207,15 @@ namespace SimpleMCPBridge.Runtime
         /// <summary>
         /// Drain queued main-thread actions.
         /// Must be called from the Unity main thread every frame.
+        /// Capped at MaxActionsPerFrame per call so a burst of queued messages
+        /// can't freeze the main thread; unprocessed actions stay in the queue
+        /// and are handled on subsequent frames (nothing is dropped).
         /// </summary>
         public void DrainQueue()
         {
             _tickCount++;
             var count = 0;
-            while (_mainThreadQueue.TryDequeue(out var action))
+            while (count < MaxActionsPerFrame && _mainThreadQueue.TryDequeue(out var action))
             {
                 count++;
                 try { action(); }
@@ -271,7 +276,9 @@ namespace SimpleMCPBridge.Runtime
 
         private void HandleMessage(string rawMessage)
         {
-            Log("HANDLE MESSAGE "+ rawMessage);
+            // Redacted trace: type/method + payload size only — never log the body
+            // (tool-call params like editor.eval code, args, secrets).
+            Log("HANDLE MESSAGE: " + DescribeMessage(rawMessage));
 
             // ── Extract message type once for routing (Fix I1) ──
             var msgType = ExtractJsonString(rawMessage, "type");
@@ -338,7 +345,9 @@ namespace SimpleMCPBridge.Runtime
             var response = _router.HandleMessage(rawMessage);
             if (response != null)
             {
-                Log($"  Response: {response.Substring(0, Math.Min(response.Length, ResponseLogLength))}...");
+                // Log size only — the response body can be huge and may contain
+                // game data; the request trace (method + size) is already logged.
+                Log($"  Response ({DescribeMessage(rawMessage)}): {response.Length} chars");
                 var client = _client;
                 if (client != null && client.IsConnected)
                     _ = SendSafeAsync(client, response);
@@ -380,7 +389,7 @@ namespace SimpleMCPBridge.Runtime
             {
                 processed = message;
             }
-            Log($"MSG QUEUED: {processed.Trim().Substring(0, Math.Min(processed.Length, LogPreviewLength))}");
+            Log("MSG QUEUED: " + DescribeMessage(processed));
             _mainThreadQueue.Enqueue(() => HandleMessage(processed));
 #if UNITY_EDITOR
             // Wake up Unity's main loop when a message is queued.
@@ -430,6 +439,21 @@ namespace SimpleMCPBridge.Runtime
         private void LogWarning(string msg)
         {
             DebugUtils.LogWarning(msg);
+        }
+
+        /// <summary>
+        /// Redacted trace description for a message: type/method + payload character
+        /// length only. Never logs the body — tool-call params (editor.eval code,
+        /// args) and other payload contents may contain secrets and can be huge.
+        /// Error paths may keep full detail separately.
+        /// </summary>
+        private static string DescribeMessage(string rawMessage)
+        {
+            var msgType = ExtractJsonString(rawMessage, "type") ?? "?";
+            var method = ExtractJsonString(rawMessage, "method");
+            return string.IsNullOrEmpty(method)
+                ? $"{msgType} ({rawMessage.Length} chars)"
+                : $"{msgType}/{method} ({rawMessage.Length} chars)";
         }
 
         /// <summary>

@@ -341,7 +341,7 @@ namespace SimpleMCPBridge.Runtime.Tools
 
         /// <summary>
         /// Dump the full visual tree of every attached panel. Per panel: panelName,
-        /// panelPath, truncated, elementCount, elements[]. Output is capped at 500
+        /// panelPath, truncated, elementCount, elements[]. Output is capped at 1000
         /// elements per panel ("truncated":true when more exist).
         /// </summary>
         public static List<string> ScanElements()
@@ -364,7 +364,7 @@ namespace SimpleMCPBridge.Runtime.Tools
             return json != null ? new List<string> { json } : new List<string>();
         }
 
-        private const int MaxElementDump = 500;
+        private const int MaxElementDump = 1000;
 
         private static string BuildPanelElementJson(UIDocument doc)
         {

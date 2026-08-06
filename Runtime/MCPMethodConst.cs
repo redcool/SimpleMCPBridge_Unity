@@ -49,6 +49,8 @@ namespace SimpleMCPBridge.Runtime
         public const string REMOVE_COMPONENT = "scene.remove_component";
         /// <summary>保存当前场景（Editor only）。</summary>
         public const string SAVE_CURRENT_SCENE = "scene.save_current";
+        /// <summary>加载场景（Editor 打开或运行时加载）。</summary>
+        public const string SCENE_LOAD_SCENE = "scene.load_scene";
         /// <summary>进入播放模式（Editor only）。</summary>
         public const string ENTER_PLAY_MODE = "scene.enter_play_mode";
         /// <summary>退出播放模式（Editor only）。</summary>
@@ -63,10 +65,20 @@ namespace SimpleMCPBridge.Runtime
         public const string REFRESH_ASSETS = "asset.refresh";
         /// <summary>从项目资源加载预制体并实例化到场景。</summary>
         public const string INSTANTIATE_PREFAB = "scene.instantiate_prefab";
+        /// <summary>把 GameObject 保存为预制体资产（Editor only）。</summary>
+        public const string SCENE_SAVE_PREFAB = "scene.save_prefab";
         /// <summary>按名称和类型搜索项目资源（AssetHandler）。</summary>
         public const string FIND_ASSETS = "asset.find_assets";
         /// <summary>查找引用了指定资源的所有资源（反向依赖查询）。</summary>
         public const string FIND_REFERENCES = "asset.find_references";
+        /// <summary>创建资源（文件夹/材质，Editor only）。</summary>
+        public const string ASSET_CREATE = "asset.create";
+        /// <summary>删除资源（默认先检查引用，Editor only）。</summary>
+        public const string ASSET_DELETE = "asset.delete";
+        /// <summary>重命名资源（Editor only）。</summary>
+        public const string ASSET_RENAME = "asset.rename";
+        /// <summary>移动资源（Editor only）。</summary>
+        public const string ASSET_MOVE = "asset.move";
         /// <summary>修改材质颜色或贴图。</summary>
         public const string SET_MATERIAL = "scene.set_material";
 
@@ -187,6 +199,20 @@ namespace SimpleMCPBridge.Runtime
         public const string UITK_CLICK = "uitk.click";
         /// <summary>设置 UI Toolkit 元素值（Toggle/Slider/SliderInt/DropdownField/TextField）。</summary>
         public const string UITK_SET_VALUE = "uitk.set_value";
+        /// <summary>动态创建 UI Toolkit 元素（运行时，不持久）。</summary>
+        public const string UITK_CREATE_ELEMENT = "uitk.create_element";
+        /// <summary>移除 UI Toolkit 元素（运行时，不持久）。</summary>
+        public const string UITK_REMOVE_ELEMENT = "uitk.remove_element";
+
+        // ── PlayerPrefs 工具 ──
+        /// <summary>获取所有已知 PlayerPrefs 键值对。</summary>
+        public const string ALL_PLAYERPREFS_GET = "playerprefs.get_all";
+        /// <summary>获取单个 PlayerPrefs 值。</summary>
+        public const string PLAYERPREFS_GET = "playerprefs.get";
+        /// <summary>设置 PlayerPrefs 值。</summary>
+        public const string PLAYERPREFS_SET = "playerprefs.set";
+        /// <summary>删除 PlayerPrefs 键。</summary>
+        public const string PLAYERPREFS_DELETE = "playerprefs.delete";
 
         // ── 统一输入工具 ──
         /// <summary>统一输入：键盘、鼠标、滚轮、轴（Input System + Legacy Input）。</summary>

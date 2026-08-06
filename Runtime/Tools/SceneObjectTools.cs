@@ -95,8 +95,29 @@ namespace SimpleMCPBridge
             remainObjPath = index > -1 ? objPath.Substring(index + 1) : objPath;
         }
 
+        // Tree serialization caps — deep/large scenes must not produce unbounded
+        // output (server max payload is 256KB). When a cap is hit the entry gets
+        // an extra "truncated":true field and descent stops; existing fields are
+        // unchanged, so the output stays byte-compatible apart from the marker.
+        private const int MaxTreeDepth = 24;    // depth cap (root = depth 0)
+        private const int MaxTreeNodes = 1500;  // total emitted node cap
+
+        private sealed class TreeNodeCounter { public int Count; }
+
         public static string BuildTreeEntry(GameObject go, string path)
         {
+            return BuildTreeEntry(go, path, 0, new TreeNodeCounter());
+        }
+
+        private static string BuildTreeEntry(GameObject go, string path, int depth, TreeNodeCounter counter)
+        {
+            if (counter.Count >= MaxTreeNodes)
+                return null; // node budget exhausted — caller marks itself truncated
+
+            // Depth cap: emit this node but stop descending below it.
+            bool truncated = depth >= MaxTreeDepth;
+            counter.Count++;
+
             // Collect component names
             var components = go.GetComponents<Component>();
             var compNames = new List<string>();
@@ -106,15 +127,25 @@ namespace SimpleMCPBridge
                     compNames.Add(c.GetType().Name);
             }
 
-            // Collect children
+            // Collect children (stop early when the node budget is exhausted)
             var childJsons = new List<string>();
-            foreach (Transform child in go.transform)
+            if (!truncated)
             {
-                childJsons.Add(BuildTreeEntry(child.gameObject, path + "/" + child.name));
+                foreach (Transform child in go.transform)
+                {
+                    var childJson = BuildTreeEntry(child.gameObject, path + "/" + child.name, depth + 1, counter);
+                    if (childJson == null)
+                    {
+                        truncated = true;
+                        break;
+                    }
+                    childJsons.Add(childJson);
+                }
             }
 
             var pos = go.transform.position;
-            return JsonHelper.BuildJsonObject(
+            var fields = new List<(string key, string valueJson)>
+            {
                 ("instanceId", go.GetInstanceID().ToString(CultureInfo.InvariantCulture)),
                 ("path", JsonHelper.EscapeString(path)),
                 ("name", JsonHelper.EscapeString(go.name)),
@@ -122,7 +153,11 @@ namespace SimpleMCPBridge
                 ("position", JsonHelper.FloatArrayJson(new[] { pos.x, pos.y, pos.z })),
                 ("components", JsonHelper.StringArrayJson(compNames.ToArray())),
                 ("children", JsonHelper.BuildJsonArray(childJsons.ToArray()))
-            );
+            };
+            if (truncated)
+                fields.Add(("truncated", JsonHelper.BoolJson(true)));
+
+            return JsonHelper.BuildJsonObject(fields.ToArray());
         }
 
         public static object ConvertValue(object rawValue, Type targetType)

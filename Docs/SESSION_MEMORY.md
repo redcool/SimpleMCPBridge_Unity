@@ -8,9 +8,19 @@
 
 - **UPM 包化已完成迁移**:包位于 `H:\ai_works\SimpleMCPBridge`(独立 git 仓库),项目 `Packages/manifest.json` 用 `file:../../SimpleMCPBridge` 引用
 - 连接架构咨询已闭环:确认**保持短连接现状**(agent 侧走 `/rpc` HTTP 短连接,不切 SSE/WS 长连接)
+- ✅ 本轮（2026-08）已完成:黑名单/白名单调用权限 + CRUD 补齐 + 服务端/桥侧安全与性能修复 + 全部活体验证 + 文档补写（AGENTS/README/Server README/本文件）——待用户提交
 
 ## 完成项 (Completed)
 
+- [x] 2026-08 **scene.call_component_method 黑名单/白名单（文件化）** — BridgeConfig.ConfigData 加 `methodBlocklist`/`methodAllowlist`(SanitizeList + 静态缓存);SceneHandler 四步门:代码默认黑名单(6 项,destroy/destroyimmediate/destroyobject/quit/quitimmediate/disconnect,不可移除)→ 配置追加黑名单 → 命名空间守卫(SimpleMCPBridge)→ 白名单模式(空=关闭,非空=只放行命中项,支持 `MethodName`/`TypeName.MethodName`,OrdinalIgnoreCase);`EnsureMethodAccessCache` 懒缓存重启生效;Resources/bridge-config.json 加两个空数组
+  - 验证(活体):配置追加 `Camera.ResetAspect` → blocked ✅;白名单模式放行 ✅;代码默认 Destroy 仍 blocked ✅;测试项目配置已还原
+- [x] 2026-08 **CRUD 补齐（12 工具,ora-1 P0/P1 全覆盖）** — P0 `scene.load_scene`(Editor 打开资产/Play 与 built 用 SceneManager,single/additive,异步;⚠ 加载后 instanceIds 全失效需重取层级)、`scene.save_prefab`(PrefabUtility.SaveAsPrefabAsset,覆盖式);新 PlayerPrefsHandler(`playerprefs.get_all/get/set/delete` — Unity 无 key 枚举 API,会话级 key 注册表,set/get 时登记);AssetHandler 4 新工具 `asset.create/delete/rename/move`(delete 带 find_references 引用预检 + force 门);UIToolkitHandler 2 新工具 `uitk.create_element/remove_element`(运行时元素,**不持久**,面板刷新即毁/即恢复)
+  - 缓存上限:`_typeCache` 256、`s_instanceIdCache` 512(clear-on-overflow,防无界增长)
+- [x] 2026-08 **服务端安全/加固（fix-2,ora-2 F1/F3/非致命项）** — `allowedIps` 白名单(默认 `["127.0.0.1","::1"]`,`isIpAllowed` 含 `::ffff:` 归一化)**只 gate `/rpc` `/sse` `/mcp`**,WS 与 `/ab` 不受限(桥走 10.0.46.244 连接不受影响);config.json 缺失→首次启动自动 copy template;maxPayload 4MB;30s ping/pong `isAlive` → 超时 `ws.terminate()`;日志脱敏(工具名+参数长度,错误路径保留详情);`npx tsc --noEmit` + build 零错
+  - 用户拍板:**F2 `/ab localpath` 任意文件读取保留不修**(只读、用户认可风险);F3 config.json 本地 gitignored 不入库,template 已提交,真实 key 从 git 历史轮换(改环境变量 `LLM_API_KEY`)
+- [x] 2026-08 **桥侧性能/可靠性（fix-3）** — DrainQueue 每帧 12 条预算(BridgeClient:214-229,Disconnect 仍全清防卡死);日志脱敏 DescribeMessage(类型+长度,错误路径保留);game.watch `_watchPropertyCache`(path|component|property → Component/MemberInfo,销毁重解析,上限 MaxWatchEntries*2);树截断 SceneObjectTools 深度24/总节点1500、uitk 1000、项目树 2000,均带 `"truncated": true`
+- [x] 2026-08 **修复 scene.load_scene 真 bug** — 首次报 `Scene 'Assets/Scenes/X.unity' not found in project`:ResolveScenePath 曾把完整路径当名字塞 FindAssets;改为路径入参先 `AssetDatabase.LoadAssetAtPath<SceneAsset>` 直接校验、FindAssets 只用文件名,修复后活体通过
+- [x] 2026-08 **文档补齐（本轮）** — AGENTS.md 工具表 101→117(加 12 新工具 + castle.click_building 补漏 + `assetbundle.build_bundle`→`asset.build_bundle` 改名修正,Directory Refs 加 PlayerPrefsHandler/BuildingHandler);桥 README 计数 101+→116(场景 26→28、资源 3→7、UITK 6→8、新增 PlayerPrefs 段 4、城堡段 1);Server README 241→286(可用工具动态注册说明、配置节重写 allowedIps/encryption/evalEnabled/llm、技术说明 +5 条、故障排查 +403 条)
 - [x] 2026-08 **UPM 包迁移(完成)** — 
   - `package.json` 创建(`com.simplemcpbridge` v1.0.0,unity 2022.3)
   - 目录复制到 `H:\ai_works\SimpleMCPBridge`(含 .git/.meta),manifest 加 `file:` 引用,源目录清空
@@ -62,11 +72,12 @@
 
 ## 进行中 (Active)
 
-- (无重大进行项)
+- (无重大进行项——本轮修复全部完成并验证，文档已补写)
 
 ## 下一步 (Next Move)
 
-- **待办: 无**(uitk 6 工具已全部实测验证)
+- **待办: 两个仓库提交由用户执行**(桥 `H:\ai_works\SimpleMCPBridge` + 服务端 `H:\ai_works\SimpleMcpServer` 均故意丢脏树)
+- **提醒: 轮换 git 历史残留的 LLM API key**——真实 key 曾提交到 SimpleMcpServer git 历史(如 98d601e),config.json 已被 .gitignore 排除;改用环境变量 `LLM_API_KEY` 覆盖(index.ts 已支持)后轮换
 - **可选优化**:
   - package.json 后续补充 `dependencies` 声明(如 com.unity.inputsystem 1.14.2 / com.unity.textmeshpro / com.tasharen.ngui),让 Unity 自动解析
   - CHANGELOG.md / LICENSE 文件补充(发布到团队前的规范)
@@ -83,6 +94,10 @@
 5. **UPM 包配置策略**:Editor 读项目 `Assets/SimpleMCPBridge-config/`(可写),Player 读 persistentDataPath(可写),Resources 只做默认值兜底 —— 因为 UPM 包内文件只读,不能作为用户配置唯一入口
 6. **单 asmdef + #if UNITY_EDITOR 保持不拆**:UPM 允许;8 处 UnityEditor 引用全部条件编译保护,已验证
 7. **类别状态不加 EditorPrefs 持久化**:裁剪是任务级临时状态(非用户偏好);EditorPrefs 全局会跨项目污染、陈旧状态破坏「装包即全开」契约;domain reload 重置回全开是安全默认。若未来出现「长任务重编译致 token 回升」痛点,再上「项目级 EditorPrefs + persisted 标注」方案(行为已写入 AGENTS.md/README.md)
+8. **call_component_method 权限合并语义(用户拍板)**:代码默认黑名单(6 项)不可移除 + 配置追加黑名单双重拦截始终优先,白名单只是最后一道放行门槛;命名空间守卫(SimpleMCPBridge)留代码不可配置 —— 宁可保守不可绕过
+9. **allowedIps 只 gate HTTP 端点**:白名单默认 `["127.0.0.1","::1"]` 仅本机,只拦 `/rpc` `/sse` `/mcp`,**不 gate** WS 与 `/ab` —— 桥走局域网 WS 连接不受影响(否则 Editor/Android 双 bridge 局域网调用会全断)
+10. **F2 `/ab localpath` 任意文件读取保留不修(用户拍板)**:只读不改写,风险已告知并接受;文档未隐藏该端点
+11. **F3 config.json 本地不入库**:template 提交、config 缺失时自动复制;真实 key 不进 git,用环境变量覆盖 —— 防御「提交真实凭据」类事故再发
 
 ## 最近踩坑 (Recents Pitfalls)
 
@@ -94,14 +109,23 @@
 - **编译错误会静默阻断 Play Mode**:`scene.enter_play_mode` 返回 `success:false` + 连续轮询 `get_play_mode` 全是 `edit`,第一反应是查编译——editor.get_console 的最近 50 条里可能全是 Log(编译错误在更早位置),要直接搜 `error CS` 或查 `Editor.log`。本会话 CS1061 卡了 Play Mode 一整天
 - **`IPanel.GetTopElementUnderPointer` 在本 Unity 2022.3 patch 不存在**(CS1061):`IPanel` 接口没有该方法;公共命中测试用 `panel.Pick(position)`(已用于 uitk.click 的 gate 检查)
 - **uitk.click 合成点击的隐藏 gate**:Clickable 的 `clicked` 只在 ProcessUpEvent 里经 `ContainsPointer(pointerId)` 触发,该缓存仅在 ①事件 `triggeredByOS=true`(只有 `MouseDownEvent/MouseUpEvent.GetPooled(Event)` 工厂会设置;PointerDown/Up 的 GetPooled 重载不会)且 ②坐标落在 `panel.visualTree.layout`(panel 空间)内才写入。两条任一不满足 → 静默 no-op 不触发回调。修法:用 `GetPooled(Event)` + `el.worldBound.center`(panel 空间)+ 布局内 clamp + `panel.Pick` 前置检查
+- **scene.load_scene 首次报 "not found in project"**:ResolveScenePath 曾把完整路径当名字塞进 FindAssets 名称过滤器 → 路径入参应先 `LoadAssetAtPath<SceneAsset>` 直接校验,FindAssets 只用文件名
+- **服务端 HTTP 403 排查**:先看 config.json 的 `allowedIps` 是否含来源 IP(默认仅 127.0.0.1/::1);测试调用从局域网 IP 打 `/rpc` 会 403 属预期,走 127.0.0.1 或加白名单
+- **DrainQueue 需帧预算**:桥队列在慢工具(树截断/大响应)时可能积压,Disconnect 必须全清(否则卡死),常规 Drain 按帧预算(12 条)防一帧卡爆
 
 ## 相关文件索引
 
 | 路径 | 说明 |
 |------|------|
-| `H:\ai_works\SimpleMcpServer\src\index.ts` | WS 服务器(679)、/rpc(1250)、/sse+/mcp(979-1005)、来源标注(268-294)、last-wins(754-765)、failover(879-917) |
-| `Runtime/BridgeClient.cs` | NetWebSocketClient(135)、BridgeId=GUID(43) |
-| `Runtime/Handlers/GameHandler.cs` | TickWatch(每10帧缓存)、get_delta 读缓存清空 |
+| `H:\ai_works\SimpleMcpServer\src\index.ts` | WS 服务器(679)、/rpc(1250)、/sse+/mcp(979-1005)、来源标注(268-294)、last-wins(754-765)、failover(879-917)、allowedIps gate(118-182)、template 自动复制(150-161)、maxPayload 4MB(713)、pong 跟踪(719-736) |
+| `H:\ai_works\SimpleMcpServer\config.json.template` | 完整配置模板(allowedIps 默认本机 + llm 段 + evalEnabled) |
+| `Runtime/BridgeClient.cs` | NetWebSocketClient(135)、BridgeId=GUID(43)、DrainQueue 帧预算(214-229) |
+| `Runtime/Config/BridgeConfig.cs` | ConfigData.methodBlocklist/methodAllowlist + SanitizeList + 静态缓存 |
+| `Runtime/Handlers/SceneHandler.cs` | LoadScene(1004)/ResolveScenePath(已修 bug)、SavePrefab(1345)、方法四重门(EnsureMethodAccessCache) |
+| `Runtime/Handlers/PlayerPrefsHandler.cs` | playerprefs.* 4 工具(会话级 key 注册表) |
+| `Runtime/Handlers/AssetHandler.cs` | asset CRUD + build_bundle(Editor,#if UNITY_EDITOR) |
+| `Runtime/Handlers/UIToolkitHandler.cs` | uitk.create_element(320)/remove_element(400) |
+| `Runtime/Handlers/GameHandler.cs` | TickWatch(每10帧缓存)、get_delta 读缓存清空、_watchPropertyCache |
 | `Runtime/MCPBridge.cs` | Update/InstanceUpdate 挂接 TickWatch |
 | `SimpleMCPBridge.asmdef` | references 含 NGUI+Unity.TextMeshPro;versionDefines NGUI_ON+TEXT_MESH_PRO_ON |
 | `C:\Users\Admin\.config\opencode\opencode.json` | unityMCP=8082/mcp(**另一个 MCP,勿动**) |

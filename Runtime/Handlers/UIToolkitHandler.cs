@@ -313,6 +313,136 @@ namespace SimpleMCPBridge.Runtime.Handlers
             }
         }
 
+        // ══════════════════════════════════════════════════════════════
+        //  uitk.create_element
+        // ══════════════════════════════════════════════════════════════
+
+        [MCPTool(MCPMethodConst.UITK_CREATE_ELEMENT,
+            "Create a UI Toolkit element at runtime and add it to a panel's visual tree. " +
+            "Params: 'panelIndex' or 'panelPath' (from uitk.get_panels), 'parent' (element path " +
+            "from uitk.get_elements; omit to add to the panel root), 'type' ∈ {Button, Label, " +
+            "Slider, Toggle}, optional 'name' and 'text'. The new element is RUNTIME-ONLY and " +
+            "NOT persisted — any panel refresh / UXML re-apply destroys it. Returns the new path.")]
+        [MCPParam("panelIndex", Type = "integer", Description = "Panel index from uitk.get_panels")]
+        [MCPParam("panelPath", Type = "string", Description = "Panel gameObjectPath from uitk.get_panels")]
+        [MCPParam("parent", Type = "string", Description = "Parent element path from uitk.get_elements (default: panel root)")]
+        [MCPParam("type", Type = "string", Required = true, Description = "Element type: Button | Label | Slider | Toggle")]
+        [MCPParam("name", Type = "string", Description = "Optional element name")]
+        [MCPParam("text", Type = "string", Description = "Optional text/label")]
+        public static string CreateElement(string paramsJson)
+        {
+            try
+            {
+                var args = ParseJsonObject(paramsJson);
+                var panel = ResolvePanelArg(args);
+                if (panel == null)
+                    return ErrorJson("uitk.create_element: panel not found (provide a valid 'panelIndex' or 'panelPath')");
+
+                var root = panel.rootVisualElement;
+                if (root == null || root.panel == null)
+                    return ErrorJson("uitk.create_element: panel is not attached (runtime / Play Mode required)");
+
+                var type = GetString(args, "type", "");
+                VisualElement el;
+                switch (type)
+                {
+                    case "Button": el = new Button(); break;
+                    case "Label": el = new Label(); break;
+                    case "Slider": el = new Slider(); break;
+                    case "Toggle": el = new Toggle(); break;
+                    default:
+                        return ErrorJson($"uitk.create_element: unsupported type '{type}' (supported: Button, Label, Slider, Toggle)");
+                }
+
+                var name = GetString(args, "name", "");
+                if (!string.IsNullOrEmpty(name)) el.name = name;
+
+                var text = GetString(args, "text", "");
+                if (!string.IsNullOrEmpty(text))
+                {
+                    if (el is TextElement textEl) textEl.text = text;
+                    else if (el is Toggle t) t.label = text;
+                    else if (el is Slider s) s.label = text;
+                }
+
+                // Relative so the element flows in the parent's layout instead of
+                // jumping to a fixed absolute position.
+                el.style.position = Position.Relative;
+
+                VisualElement parentEl = root;
+                var parentPath = GetString(args, "parent", "");
+                if (!string.IsNullOrEmpty(parentPath))
+                {
+                    parentEl = UIToolkitAnalysisTools.ResolveElement(root, parentPath);
+                    if (parentEl == null)
+                        return ErrorJson($"uitk.create_element: parent element not found for path '{parentPath}'");
+                }
+                parentEl.Add(el);
+
+                return JsonHelper.BuildJsonObject(
+                    ("success", "true"),
+                    ("path", JsonHelper.EscapeString(UIToolkitAnalysisTools.GetElementPath(el))),
+                    ("type", JsonHelper.EscapeString(el.GetType().Name)),
+                    ("parent", JsonHelper.EscapeString(parentEl == root ? "" : UIToolkitAnalysisTools.GetElementPath(parentEl))),
+                    ("warning", JsonHelper.EscapeString("Runtime-only element — NOT persisted; a panel refresh / UXML re-apply destroys it."))
+                );
+            }
+            catch (Exception ex)
+            {
+                return ErrorJson($"UI Toolkit create_element failed: {ex.Message}");
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  uitk.remove_element
+        // ══════════════════════════════════════════════════════════════
+
+        [MCPTool(MCPMethodConst.UITK_REMOVE_ELEMENT,
+            "Remove a UI Toolkit element from the panel visual tree. Params: 'panelIndex' or " +
+            "'panelPath' plus 'path' (element path from uitk.get_elements). RUNTIME-ONLY — the " +
+            "removal is NOT persisted; a panel refresh / UXML re-apply restores the element. " +
+            "Returns the removed path and its former parent path.")]
+        [MCPParam("panelIndex", Type = "integer", Description = "Panel index from uitk.get_panels")]
+        [MCPParam("panelPath", Type = "string", Description = "Panel gameObjectPath from uitk.get_panels")]
+        [MCPParam("path", Type = "string", Required = true, Description = "Element path from uitk.get_elements")]
+        public static string RemoveElement(string paramsJson)
+        {
+            try
+            {
+                var args = ParseJsonObject(paramsJson);
+                var panel = ResolvePanelArg(args);
+                if (panel == null)
+                    return ErrorJson("uitk.remove_element: panel not found (provide a valid 'panelIndex' or 'panelPath')");
+
+                var root = panel.rootVisualElement;
+                if (root == null || root.panel == null)
+                    return ErrorJson("uitk.remove_element: panel is not attached (runtime / Play Mode required)");
+
+                var path = GetString(args, "path", "");
+                if (string.IsNullOrEmpty(path))
+                    return ErrorJson("uitk.remove_element: missing required parameter 'path'");
+
+                var el = UIToolkitAnalysisTools.ResolveElement(root, path);
+                if (el == null)
+                    return ErrorJson($"uitk.remove_element: element not found for path '{path}'");
+
+                var parentPath = el.parent != null && el.parent != root
+                    ? UIToolkitAnalysisTools.GetElementPath(el.parent)
+                    : "";
+                el.RemoveFromHierarchy();
+
+                return JsonHelper.BuildJsonObject(
+                    ("success", "true"),
+                    ("removedPath", JsonHelper.EscapeString(path)),
+                    ("parentPath", JsonHelper.EscapeString(parentPath))
+                );
+            }
+            catch (Exception ex)
+            {
+                return ErrorJson($"UI Toolkit remove_element failed: {ex.Message}");
+            }
+        }
+
         // ── Internal helpers ──
 
         private static UIDocument ResolvePanelArg(Dictionary<string, object> args)

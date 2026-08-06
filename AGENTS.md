@@ -62,7 +62,7 @@ server keeps only the most recent one.
 - **Server stderr:** `SimpleMcpServer/server.err`
 - **Unity Editor log:** `$env:LOCALAPPDATA\Unity\Editor\Editor.log`
 
-## Tools (101)
+## Tools (117)
 
 | Tool | What it does | Platform |
 |------|-------------|----------|
@@ -86,6 +86,8 @@ server keeps only the most recent one.
 | `scene.remove_component` | Remove a component from a GameObject | All |
 | `scene.instantiate_prefab` | Instantiate a prefab from project Assets | Editor |
 | `scene.save_current` | Save current scene | Editor |
+| `scene.load_scene` | Load a scene (Editor: open asset; Play/built: SceneManager, single/additive) — ⚠ after load ALL instanceIds go stale, re-fetch hierarchy | All |
+| `scene.save_prefab` | Save a GameObject (instanceId/path) as a prefab asset (overwrites existing) | Editor |
 | `scene.enter_play_mode` | Enter Play Mode | Editor |
 | `scene.exit_play_mode` | Exit Play Mode | Editor |
 | `scene.pause_play_mode` | Pause/resume Play Mode | Editor |
@@ -104,6 +106,10 @@ server keeps only the most recent one.
 | `asset.refresh` | Refresh Unity asset database | All |
 | `asset.find_assets` | Search Assets/ by name and/or type (AssetDatabase.FindAssets) | Editor |
 | `asset.find_references` | Find all assets referencing a given asset | All |
+| `asset.create` | Create asset: type `folder`/`material` (+ optional color) | Editor |
+| `asset.delete` | Delete asset (reference pre-check; `force=true` skips) | Editor |
+| `asset.rename` | Rename asset (`newName` without extension) | Editor |
+| `asset.move` | Move asset to `newPath` | Editor |
 | `scene_view.get_camera` | Get SceneView camera state (pos/rot/FOV/pivot) | Editor |
 | `scene_view.set_camera` | Set SceneView camera (position/rotation/size/ortho) | Editor |
 | `editor.request_compile` | Trigger Unity script recompilation | Editor |
@@ -135,6 +141,8 @@ server keeps only the most recent one.
 | `uitk.get_elements` | Dump UITK visual tree (name/type/path/classes/rect/state) | All |
 | `uitk.click` | Click UITK element by path or normalized coords (pooled PointerDown/Up dispatch) | All |
 | `uitk.set_value` | Set Toggle/Slider/SliderInt/DropdownField/TextField value (optional silent) | All |
+| `uitk.create_element` | Create runtime UI Toolkit element (Button/Label/Slider/Toggle) in a panel — NOT persisted (panel refresh/UXML re-apply destroys it) | All |
+| `uitk.remove_element` | Remove UI Toolkit element from panel — NOT persisted (refresh restores) | All |
 | `ui.set_input_field_text` | Set InputField/TMP_InputField text directly | All |
 | `ui.set_toggle` | Set Toggle on/off | All |
 | `ui.set_slider` | Set Slider value (normalized 0-1 maps to minValue-maxValue) | All |
@@ -155,13 +163,18 @@ server keeps only the most recent one.
 | `game.wait` | Async wait: seconds, scene load, UI appear/disappear, component property | All |
 | `game.wait_check` | Poll game.wait completion status | All |
 | `game.batch` | Execute multiple tool calls in one Unity frame (max 50, reduces N+1 round trips to 1) | All |
+| `playerprefs.get_all` | Get all session-known PlayerPrefs keys with type-sniffed values (Unity has no key enumeration API — only keys seen via set/get) | All |
+| `playerprefs.get` | Get single PlayerPrefs value (optional `keyType`: int/float/string, auto-detected) | All |
+| `playerprefs.set` | Set PlayerPrefs value (optional `valueType`, auto-detected from JSON type; `save`=true default) | All |
+| `playerprefs.delete` | Delete a PlayerPrefs key | All |
+| `castle.click_building` ⚠ | Click a 3D castle building at normalized screen position (project-specific tool) | All |
 | `recording.start` | Start recording via InstantReplay (Android only, Play Mode) | Android |
 | `recording.stop` | Stop recording and finalize MP4 (async, poll status) | Android |
 | `recording.status` | Get current recording/export state | Android |
 | `recording.reset` | Force-reset recording system (recover from stuck state) | Android |
 | `shader.hot_replace` | Runtime hot-swap a Shader from an AB (WebClient download), global or per-path with instance materials | PlayMode |
 | `shader.hot_replace_status` | Poll shader.hot_replace progress | PlayMode |
-| `assetbundle.build_bundle` | Build an AssetBundle from project assets (Editor only, uses BuildPipeline) | Editor |
+| `asset.build_bundle` | Build an AssetBundle from project assets (Editor only, uses BuildPipeline) | Editor |
 | `assetbundle.hot_replace` | Download AB and auto-deploy assets by type (Shader/Material/Texture/AudioClip/Mesh/ScriptableObject/Prefab). Async with polling. Supports saveBackup, dryRun, rollback | PlayMode |
 | `assetbundle.hot_replace_status` | Poll hot_replace progress (per-type counts, instanceIds, errors) | PlayMode |
 | `assetbundle.rollback` | Rollback a previous hot_replace (requires saveBackup:true) | PlayMode |
@@ -383,7 +396,9 @@ compilation error — check `editor.get_console` for details.
 | `Editor/MCPBridgeEditor.cs` | Custom Editor for MCPBridge Inspector |
 | `Runtime/Handlers/AssetBundleHotReplaceHandler.cs` | General AB hot-deploy (+ rollback) |
 | `Runtime/Handlers/ShaderHotReplaceHandler.cs` | Shader-only hot-swap |
-| `Runtime/Handlers/AssetHandler.cs` | Asset tools (find, refresh, build_bundle) |
+| `Runtime/Handlers/AssetHandler.cs` | Asset tools (find, refresh, create/delete/rename/move, build_bundle) |
+| `Runtime/Handlers/PlayerPrefsHandler.cs` | PlayerPrefs tools (get_all/get/set/delete — Unity 无 key 枚举 API，会话级 key 注册表) |
+| `Runtime/Handlers/BuildingHandler.cs` | 项目特定 castle.click_building（Physics.Raycast + Lua FakeHitResultEvent） |
 | `Plugins/` | NuGet DLL 依赖（InstantReplay/UniEnc 需要，已含在仓库内）|
 | `bridge-config.json` | Bridge IP/port |
 

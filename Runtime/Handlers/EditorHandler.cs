@@ -284,10 +284,26 @@ namespace SimpleMCPBridge.Runtime.Handlers
             }
         }
 
+        // Total-node cap for the project tree — large projects must not produce
+        // unbounded JSON (server max payload is 256KB). When the cap is hit a
+        // "truncated":true field is added to the node where listing stopped;
+        // existing fields are unchanged.
+        private const int MaxProjectTreeNodes = 2000;
+
+        private sealed class TreeNodeCounter { public int Count; }
+
         public static void BuildTreeJson(StringBuilder sb, string dir, int depth, int maxDepth)
         {
-            if (depth > maxDepth) return;
+            var counter = new TreeNodeCounter();
+            BuildTreeJson(sb, dir, depth, maxDepth, counter);
+        }
+
+        private static bool BuildTreeJson(StringBuilder sb, string dir, int depth, int maxDepth, TreeNodeCounter counter)
+        {
+            if (depth > maxDepth) return false;
             if (depth == 0) sb.Append("[");
+
+            bool truncated = false;
 
             try
             {
@@ -298,24 +314,41 @@ namespace SimpleMCPBridge.Runtime.Handlers
                 foreach (var d in dirInfo.GetDirectories().OrderBy(d => d.Name))
                 {
                     if (d.Name.StartsWith(".") || d.Name == "~") continue;
+                    if (counter.Count >= MaxProjectTreeNodes) { truncated = true; break; }
                     if (!first) sb.Append(","); first = false;
+                    counter.Count++;
                     sb.Append($@"{{""name"":{JsonHelper.EscapeString(d.Name)},""path"":{JsonHelper.EscapeString(d.FullName)},""type"":""folder"",""size"":0,");
                     sb.Append("\"children\":[");
-                    BuildTreeJson(sb, d.FullName, depth + 1, maxDepth);
-                    sb.Append("]}");
+                    var childTruncated = BuildTreeJson(sb, d.FullName, depth + 1, maxDepth, counter);
+                    sb.Append("]");
+                    if (childTruncated) sb.Append(",\"truncated\":true");
+                    sb.Append("}");
                 }
 
                 // Files
                 foreach (var f in dirInfo.GetFiles().OrderBy(f => f.Name))
                 {
                     if (f.Name.StartsWith(".") || f.Name.EndsWith(".meta")) continue;
+                    if (counter.Count >= MaxProjectTreeNodes) { truncated = true; break; }
                     if (!first) sb.Append(","); first = false;
+                    counter.Count++;
                     sb.Append($@"{{""name"":{JsonHelper.EscapeString(f.Name)},""path"":{JsonHelper.EscapeString(f.FullName)},""type"":""file"",""size"":{f.Length}}}");
                 }
             }
             catch (UnauthorizedAccessException ex) { UnityEngine.Debug.LogWarning($"[EditorHandler] access denied: {ex.Message}"); }
 
-            if (depth == 0) sb.Append("]");
+            if (depth == 0)
+            {
+                if (truncated)
+                {
+                    // The root is an array, so it has no parent object to carry the
+                    // marker — annotate the last emitted entry instead.
+                    var lastBrace = sb.ToString().LastIndexOf('}');
+                    if (lastBrace >= 0) sb.Insert(lastBrace, ",\"truncated\":true");
+                }
+                sb.Append("]");
+            }
+            return truncated;
         }
     }
 }

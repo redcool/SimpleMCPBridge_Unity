@@ -112,7 +112,42 @@ namespace SimpleMCPBridge.Runtime.Handlers
                 return ErrorJson($"Asset not found at path: {assetPath}");
 
             // Step 2: Scan all text-based asset files in Assets/ for the GUID
+            var referencingPaths = ScanGUIDReferences(assetPath);
             var results = new List<string>();
+            foreach (var relativePath in referencingPaths)
+            {
+                var refGuid = AssetDatabase.AssetPathToGUID(relativePath);
+                var assetName = Path.GetFileNameWithoutExtension(relativePath);
+                var assetType = AssetDatabase.GetMainAssetTypeAtPath(relativePath);
+
+                results.Add(JsonHelper.BuildJsonObject(
+                    ("path", JsonHelper.EscapeString(relativePath)),
+                    ("name", JsonHelper.EscapeString(assetName)),
+                    ("type", assetType != null ? JsonHelper.EscapeString(assetType.Name) : "\"unknown\""),
+                    ("guid", JsonHelper.EscapeString(refGuid))
+                ));
+            }
+
+            return JsonHelper.BuildJsonObject(
+                ("targetPath", JsonHelper.EscapeString(assetPath)),
+                ("targetGuid", JsonHelper.EscapeString(targetGuid)),
+                ("referenceCount", results.Count.ToString(CultureInfo.InvariantCulture)),
+                ("references", JsonHelper.BuildJsonArray(results.ToArray()))
+            );
+        }
+
+        /// <summary>
+        /// Scan all text-based asset files under Assets/ for the target asset's GUID.
+        /// Returns the relative "Assets/..." paths of files whose content contains the
+        /// GUID. Shared by asset.find_references and asset.delete's pre-check.
+        /// </summary>
+        private static List<string> ScanGUIDReferences(string assetPath)
+        {
+            var results = new List<string>();
+            var targetGuid = AssetDatabase.AssetPathToGUID(assetPath);
+            if (string.IsNullOrEmpty(targetGuid))
+                return results;
+
             var assetsDir = Application.dataPath;
             var binaryExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -140,18 +175,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
                     if (content.Contains(targetGuid))
                     {
                         // Convert absolute path to "Assets/..." relative path
-                        var relativePath = "Assets" + file.Substring(assetsDir.Length).Replace('\\', '/');
-
-                        var refGuid = AssetDatabase.AssetPathToGUID(relativePath);
-                        var assetName = Path.GetFileNameWithoutExtension(file);
-                        var assetType = AssetDatabase.GetMainAssetTypeAtPath(relativePath);
-
-                        results.Add(JsonHelper.BuildJsonObject(
-                            ("path", JsonHelper.EscapeString(relativePath)),
-                            ("name", JsonHelper.EscapeString(assetName)),
-                            ("type", assetType != null ? JsonHelper.EscapeString(assetType.Name) : "\"unknown\""),
-                            ("guid", JsonHelper.EscapeString(refGuid))
-                        ));
+                        results.Add("Assets" + file.Substring(assetsDir.Length).Replace('\\', '/'));
                     }
                 }
                 catch
@@ -160,11 +184,139 @@ namespace SimpleMCPBridge.Runtime.Handlers
                 }
             }
 
-return JsonHelper.BuildJsonObject(
-                ("targetPath", JsonHelper.EscapeString(assetPath)),
-                ("targetGuid", JsonHelper.EscapeString(targetGuid)),
-                ("referenceCount", results.Count.ToString(CultureInfo.InvariantCulture)),
-                ("references", JsonHelper.BuildJsonArray(results.ToArray()))
+            return results;
+        }
+
+        [MCPTool(MCPMethodConst.ASSET_CREATE,
+            "Create an asset in the project. type: 'folder' or 'material'. " +
+            "Folder: name (new folder) + path (parent folder, e.g. 'Assets/Art'). " +
+            "Material: name + path (parent folder) + optional color [r,g,b] or [r,g,b,a]. " +
+            "NOTE: AssetDatabase operations are NOT Undo-trackable.",
+            Platform = MCPToolPlatforms.Editor)]
+        [MCPParam("type", Type = "string", Required = true, Description = "'folder' or 'material'")]
+        [MCPParam("name", Type = "string", Required = true, Description = "New asset name (no extension for folders)")]
+        [MCPParam("path", Type = "string", Required = true, Description = "Parent folder, e.g. 'Assets/Art'")]
+        [MCPParam("color", Type = "array", Description = "[r,g,b] or [r,g,b,a] material color")]
+        public static string Create(string paramsJson)
+        {
+            var args = ParseJsonObject(paramsJson);
+            var type = GetRequiredString(args, "type").ToLowerInvariant();
+            var name = GetRequiredString(args, "name");
+            var path = GetRequiredString(args, "path");
+
+            if (type == "folder")
+            {
+                var result = AssetDatabase.CreateFolder(path, name);
+                if (string.IsNullOrEmpty(result))
+                    return ErrorJson($"CreateFolder failed at '{path}/{name}' — parent may not exist or folder already exists");
+                AssetDatabase.SaveAssets();
+                return JsonHelper.BuildJsonObject(
+                    ("success", "true"),
+                    ("type", JsonHelper.EscapeString("folder")),
+                    ("path", JsonHelper.EscapeString(result))
+                );
+            }
+
+            if (type == "material")
+            {
+                var mat = new Material(Shader.Find("Standard"));
+                var colorArr = GetOptionalFloatArray(args, "color");
+                if (colorArr != null && colorArr.Length >= 3)
+                {
+                    mat.color = colorArr.Length >= 4
+                        ? new Color(colorArr[0], colorArr[1], colorArr[2], colorArr[3])
+                        : new Color(colorArr[0], colorArr[1], colorArr[2], 1f);
+                }
+                var assetPath = path.TrimEnd('/') + "/" + name + ".mat";
+                AssetDatabase.CreateAsset(mat, assetPath);
+                AssetDatabase.SaveAssets();
+                return JsonHelper.BuildJsonObject(
+                    ("success", "true"),
+                    ("type", JsonHelper.EscapeString("material")),
+                    ("path", JsonHelper.EscapeString(assetPath))
+                );
+            }
+
+            return ErrorJson($"Unsupported asset type '{type}' (supported: 'folder', 'material')");
+        }
+
+        [MCPTool(MCPMethodConst.ASSET_DELETE,
+            "Delete an asset by path. force=false (default) first runs the find_references " +
+            "GUID scan — if any asset references the target, returns an error with the reference " +
+            "count instead of silently breaking references. force=true skips the check. " +
+            "NOTE: AssetDatabase operations are NOT Undo-trackable.",
+            Platform = MCPToolPlatforms.Editor)]
+        [MCPParam("assetPath", Type = "string", Required = true, Description = "Asset path, e.g. 'Assets/Prefabs/X.prefab'")]
+        [MCPParam("force", Type = "boolean", Description = "Skip reference check and delete (default false)")]
+        public static string Delete(string paramsJson)
+        {
+            var args = ParseJsonObject(paramsJson);
+            var assetPath = GetRequiredString(args, "assetPath");
+            var force = GetOptionalBool(args, "force") ?? false;
+
+            if (!force)
+            {
+                var refs = ScanGUIDReferences(assetPath);
+                if (refs.Count > 0)
+                    return ErrorJson($"Cannot delete '{assetPath}' — {refs.Count} asset(s) reference it " +
+                                     $"(e.g. '{refs[0]}'). Use force=true to delete anyway.");
+            }
+
+            if (!AssetDatabase.DeleteAsset(assetPath))
+                return ErrorJson($"DeleteAsset failed for '{assetPath}' — asset may not exist");
+            AssetDatabase.SaveAssets();
+            return JsonHelper.BuildJsonObject(
+                ("success", "true"),
+                ("assetPath", JsonHelper.EscapeString(assetPath))
+            );
+        }
+
+        [MCPTool(MCPMethodConst.ASSET_RENAME,
+            "Rename an asset in place. Returns the new path. " +
+            "NOTE: AssetDatabase operations are NOT Undo-trackable.",
+            Platform = MCPToolPlatforms.Editor)]
+        [MCPParam("assetPath", Type = "string", Required = true, Description = "Asset path, e.g. 'Assets/Art/X.prefab'")]
+        [MCPParam("newName", Type = "string", Required = true, Description = "New asset name WITHOUT extension, e.g. 'Y'")]
+        public static string Rename(string paramsJson)
+        {
+            var args = ParseJsonObject(paramsJson);
+            var assetPath = GetRequiredString(args, "assetPath");
+            var newName = GetRequiredString(args, "newName");
+
+            var error = AssetDatabase.RenameAsset(assetPath, newName);
+            if (!string.IsNullOrEmpty(error))
+                return ErrorJson($"RenameAsset failed: {error}");
+            AssetDatabase.SaveAssets();
+
+            var dir = Path.GetDirectoryName(assetPath)?.Replace('\\', '/');
+            var newPath = $"{dir}/{newName}{Path.GetExtension(assetPath)}";
+            return JsonHelper.BuildJsonObject(
+                ("success", "true"),
+                ("oldPath", JsonHelper.EscapeString(assetPath)),
+                ("newPath", JsonHelper.EscapeString(newPath))
+            );
+        }
+
+        [MCPTool(MCPMethodConst.ASSET_MOVE,
+            "Move (or re-parent) an asset to a new path. Returns old + new path. " +
+            "NOTE: AssetDatabase operations are NOT Undo-trackable.",
+            Platform = MCPToolPlatforms.Editor)]
+        [MCPParam("assetPath", Type = "string", Required = true, Description = "Asset path, e.g. 'Assets/Art/X.prefab'")]
+        [MCPParam("newPath", Type = "string", Required = true, Description = "Destination path, e.g. 'Assets/Prefabs/X.prefab'")]
+        public static string Move(string paramsJson)
+        {
+            var args = ParseJsonObject(paramsJson);
+            var assetPath = GetRequiredString(args, "assetPath");
+            var newPath = GetRequiredString(args, "newPath");
+
+            var error = AssetDatabase.MoveAsset(assetPath, newPath);
+            if (!string.IsNullOrEmpty(error))
+                return ErrorJson($"MoveAsset failed: {error}");
+            AssetDatabase.SaveAssets();
+            return JsonHelper.BuildJsonObject(
+                ("success", "true"),
+                ("oldPath", JsonHelper.EscapeString(assetPath)),
+                ("newPath", JsonHelper.EscapeString(newPath))
             );
         }
 
