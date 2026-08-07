@@ -295,7 +295,7 @@ Quality → Bitrate 映射：
 | `input.key_press` | `key`(必填), `action`(tap\|hold\|release) | 模拟键盘按键。action 说明：`tap`=按下立即释放（跳跃/射击），`hold`=持续按住（WASD 移动），`release`=释放按键（key=`*` 或省略时释放全部）。使用 InputSystem.QueueStateEvent 在物理键盘设备上 |
 | `input.touch` | `action`(必填,tap\|start\|move\|end), `x`(0-1), `y`(0-1), `fingerId`(0) | 触屏模拟。action: `tap`=立即触+放，`start`=开始触摸，`move`=移动到新位置，`end`=抬起。滑动手势：连续调用 start → move × N → end |
 | `input.swipe` | `startX`/`startY`(必填,0-1), `endX`/`endY`(必填,0-1), `duration`(0.3s), `steps`(15), `fingerId`(0) | 从一个点到另一个点平滑滑动手势。异步多帧执行，立即返回估算时长。使用 game.wait 等待完成 |
-| `input.gamepad` | `action`(必填) | 虚拟手柄控制。action 操作：`button`→需 `button`(名称)+ `press`(tap/press/release)；`axis`→需 `axis`(名称)+ `value`(-1..1)；`set`→批量，需 `buttons[]` + `axes{}`；`reset`→全部归零；`state`→查询当前状态 |
+| `input.gamepad` | `action`(必填) | 虚拟手柄控制。action 操作：`button`→需 `button`(名称)+ `press`(tap/press/release)；`axis`→需 `axis`(名称)+ `value`(-1..1)；`set`→批量，需 `buttons[]` + `axes{}`；`reset`→全部归零；`state`→查询当前状态；`rumble`→震动(`lowFreq`/`highFreq` 0-1, `duration` 秒,<=0 停止) |
 | `input.get_state` | — | 查询所有当前输入状态。返回：trackedKeys（当前按下的键列表）、mousePosition（归一化鼠标位置）、mouseDelta、mouseScroll、gamepadState（连接检测+所有按钮/轴值） |
 
 **gamepad 按键名**：`south/a`、`east/b`、`north/x`、`west/y`、`leftShoulder/lb`、`rightShoulder/rb`、`leftStick`、`rightStick`、`start`、`select/back`、`dpadUp/down/left/right`

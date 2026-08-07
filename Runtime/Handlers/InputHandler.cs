@@ -289,16 +289,20 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "  3. set — batch operation. Needs 'buttons' (array of {button, press}) and/or 'axes' (object of name→value)." +
             "  4. reset — reset all buttons and axes to neutral." +
             "  5. state — get current button/axis state." +
+            "  6. rumble — trigger haptic vibration. Needs 'lowFreq' (0-1), 'highFreq' (0-1), 'duration' (seconds, <=0 = stop)." +
             "Button names: south/east/north/west, a/b/x/y, leftShoulder/rightShoulder, lb/rb," +
             "leftStick/rightStick, start/select/back, dpadUp/down/left/right. " +
             "Axis names: leftStickX/Y, rightStickX/Y, leftTrigger, rightTrigger.")]
-        [MCPParam("action", Type = "string", Required = true, Description = "button/axis/set/reset/state", EnumValues = new[] { "button", "axis", "set", "reset", "state" })]
+        [MCPParam("action", Type = "string", Required = true, Description = "button/axis/set/reset/state/rumble", EnumValues = new[] { "button", "axis", "set", "reset", "state", "rumble" })]
         [MCPParam("button", Type = "string", Description = "Button name (action=button), e.g. 'south'")]
         [MCPParam("press", Type = "string", Description = "tap/press/release (action=button)", EnumValues = new[] { "tap", "press", "release" })]
         [MCPParam("axis", Type = "string", Description = "Axis name (action=axis), e.g. 'leftStickX'")]
         [MCPParam("value", Type = "number", Description = "Axis value -1..1 (action=axis)")]
         [MCPParam("buttons", Type = "array", Description = "Batch buttons [{button,press}] (action=set)")]
         [MCPParam("axes", Type = "object", Description = "Batch axes {name:value} (action=set)")]
+        [MCPParam("lowFreq", Type = "number", Description = "Low-frequency motor 0-1 (default 0.5)")]
+        [MCPParam("highFreq", Type = "number", Description = "High-frequency motor 0-1 (default 0.5)")]
+        [MCPParam("duration", Type = "number", Description = "Rumble duration in seconds (default 0.5, <=0 stops)")]
         public static string Gamepad(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
@@ -395,6 +399,21 @@ namespace SimpleMCPBridge.Runtime.Handlers
                     );
                 }
 
+                case "rumble":
+                {
+                    var lowFreq = GetFloat(args, "lowFreq", 0.5f);
+                    var highFreq = GetFloat(args, "highFreq", 0.5f);
+                    var duration = GetFloat(args, "duration", 0.5f);
+                    GamepadTools.SetRumble(lowFreq, highFreq, duration);
+                    return JsonHelper.BuildJsonObject(
+                        ("success", "true"),
+                        ("action", JsonHelper.EscapeString("rumble")),
+                        ("lowFreq", lowFreq.ToString("G", CultureInfo.InvariantCulture)),
+                        ("highFreq", highFreq.ToString("G", CultureInfo.InvariantCulture)),
+                        ("duration", duration.ToString("G", CultureInfo.InvariantCulture))
+                    );
+                }
+
                 case "reset":
                 {
                     GamepadTools.ResetAll();
@@ -413,6 +432,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
                         if ((state.buttons & (1 << (int)btn)) != 0)
                             pressedButtons.Add(btn.ToString());
                     }
+                    var r = GamepadTools.GetRumbleState();
                     return JsonHelper.BuildJsonObject(
                         ("success", "true"),
                         ("action", JsonHelper.EscapeString("state")),
@@ -422,13 +442,16 @@ namespace SimpleMCPBridge.Runtime.Handlers
                         ("rightStickX", state.rightStick.x.ToString("G", CultureInfo.InvariantCulture)),
                         ("rightStickY", state.rightStick.y.ToString("G", CultureInfo.InvariantCulture)),
                         ("leftTrigger", state.leftTrigger.ToString("G", CultureInfo.InvariantCulture)),
-                        ("rightTrigger", state.rightTrigger.ToString("G", CultureInfo.InvariantCulture))
+                        ("rightTrigger", state.rightTrigger.ToString("G", CultureInfo.InvariantCulture)),
+                        ("rumbleActive", r.active ? "true" : "false"),
+                        ("lowFreq", r.low.ToString("G", CultureInfo.InvariantCulture)),
+                        ("highFreq", r.high.ToString("G", CultureInfo.InvariantCulture))
                     );
                 }
 
                 default:
                     return ErrorJson($"Unknown gamepad action '{action}'. " +
-                        "Use 'button', 'axis', 'set', 'reset', or 'state'.");
+                        "Use 'button', 'axis', 'set', 'reset', 'state', or 'rumble'.");
             }
         }
 

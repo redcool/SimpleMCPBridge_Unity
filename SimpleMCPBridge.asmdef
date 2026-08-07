@@ -6,7 +6,8 @@
         "InstantReplay",
         "UniEnc",
         "NGUI",
-        "Unity.TextMeshPro"
+        "Unity.TextMeshPro",
+        "Unity.RenderPipelines.Core.Runtime"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
@@ -35,6 +36,11 @@
             "name": "com.unity.textmeshpro",
             "expression": "",
             "define": "TEXT_MESH_PRO_ON"
+        },
+        {
+            "name": "com.unity.render-pipelines.core",
+            "expression": "",
+            "define": "RENDER_PIPELINES_CORE_ON"
         }
     ],
     "noEngineReferences": false

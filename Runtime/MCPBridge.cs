@@ -126,6 +126,7 @@ namespace SimpleMCPBridge.Runtime
             _bridge.DrainQueue();
 #if UNITY_INPUT_SYSTEM
             MouseDeviceTools.TickDeferredClick();
+            Tools.GamepadTools.TickRumble();
 #endif
             Handlers.GameHandler.TickWatch();
 
@@ -150,6 +151,7 @@ namespace SimpleMCPBridge.Runtime
             _bridge.DrainQueue();
 #if UNITY_INPUT_SYSTEM
             MouseDeviceTools.TickDeferredClick();
+            Tools.GamepadTools.TickRumble();
 #endif
             Handlers.GameHandler.TickWatch();
 

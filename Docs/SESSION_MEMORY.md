@@ -19,6 +19,7 @@
 - [x] 2026-08 **服务端安全/加固（fix-2,ora-2 F1/F3/非致命项）** — `allowedIps` 白名单(默认 `["127.0.0.1","::1"]`,`isIpAllowed` 含 `::ffff:` 归一化)**只 gate `/rpc` `/sse` `/mcp`**,WS 与 `/ab` 不受限(桥走 10.0.46.244 连接不受影响);config.json 缺失→首次启动自动 copy template;maxPayload 4MB;30s ping/pong `isAlive` → 超时 `ws.terminate()`;日志脱敏(工具名+参数长度,错误路径保留详情);`npx tsc --noEmit` + build 零错
   - 用户拍板:**F2 `/ab localpath` 任意文件读取保留不修**(只读、用户认可风险);F3 config.json 本地 gitignored 不入库,template 已提交,真实 key 从 git 历史轮换(改环境变量 `LLM_API_KEY`)
 - [x] 2026-08 **桥侧性能/可靠性（fix-3）** — DrainQueue 每帧 12 条预算(BridgeClient:214-229,Disconnect 仍全清防卡死);日志脱敏 DescribeMessage(类型+长度,错误路径保留);game.watch `_watchPropertyCache`(path|component|property → Component/MemberInfo,销毁重解析,上限 MaxWatchEntries*2);树截断 SceneObjectTools 深度24/总节点1500、uitk 1000、项目树 2000,均带 `"truncated": true`
+- [x] 2026-08 **gamepad rumble（触发）** — input.gamepad action=rumble(lowFreq/highFreq/duration) + 每帧 TickRumble 自动归零 + ResetAll 清震动;感知走 game.watch 既有通道不建新工具;传感器模拟(加速度计/陀螺仪)评估后暂缓(无目标游戏需求+真机虚拟传感器未验证)
 - [x] 2026-08 **修复 scene.load_scene 真 bug** — 首次报 `Scene 'Assets/Scenes/X.unity' not found in project`:ResolveScenePath 曾把完整路径当名字塞 FindAssets;改为路径入参先 `AssetDatabase.LoadAssetAtPath<SceneAsset>` 直接校验、FindAssets 只用文件名,修复后活体通过
 - [x] 2026-08 **文档补齐（本轮）** — AGENTS.md 工具表 101→117(加 12 新工具 + castle.click_building 补漏 + `assetbundle.build_bundle`→`asset.build_bundle` 改名修正,Directory Refs 加 PlayerPrefsHandler/BuildingHandler);桥 README 计数 101+→116(场景 26→28、资源 3→7、UITK 6→8、新增 PlayerPrefs 段 4、城堡段 1);Server README 241→286(可用工具动态注册说明、配置节重写 allowedIps/encryption/evalEnabled/llm、技术说明 +5 条、故障排查 +403 条)
 - [x] 2026-08 **UPM 包迁移(完成)** — 
@@ -98,6 +99,7 @@
 9. **allowedIps 只 gate HTTP 端点**:白名单默认 `["127.0.0.1","::1"]` 仅本机,只拦 `/rpc` `/sse` `/mcp`,**不 gate** WS 与 `/ab` —— 桥走局域网 WS 连接不受影响(否则 Editor/Android 双 bridge 局域网调用会全断)
 10. **F2 `/ab localpath` 任意文件读取保留不修(用户拍板)**:只读不改写,风险已告知并接受;文档未隐藏该端点
 11. **F3 config.json 本地不入库**:template 提交、config 缺失时自动复制;真实 key 不进 git,用环境变量覆盖 —— 防御「提交真实凭据」类事故再发
+12. **grill-me / grill-with-docs 两个 skill 的取舍(评估结论)**:grill-me(纯访谈 prompt,一次一问+推荐答案,可查代码)保留备用 —— 新设计/新计划压力测试时说「grill me」即用;grill-with-docs(术语管理 CONTEXT.md + ADR 归档 + 代码交叉验证)**本项目不用** —— 其 ADR 产物已被本文件「关键决策记录」节覆盖、术语已被 AGENTS.md 覆盖,且会新建 CONTEXT.md/docs/adr 体系与现有双文档(AGENTS.md + 本文件)重叠冲突;若某天要正式引入 CONTEXT/ADR 体系再重划文档边界
 
 ## 最近踩坑 (Recents Pitfalls)
 

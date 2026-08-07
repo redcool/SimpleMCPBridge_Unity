@@ -192,6 +192,7 @@ namespace SimpleMCPBridge.Runtime.Tools
         {
             if (_virtualGamepad == null || !_virtualGamepad.added) return;
             ApplyState(new GamepadState()); // all zero = neutral
+            StopRumble();
         }
 
         /// <summary>Remove the virtual gamepad device.</summary>
@@ -202,6 +203,61 @@ namespace SimpleMCPBridge.Runtime.Tools
                 InputSystem.RemoveDevice(_virtualGamepad);
             }
             _virtualGamepad = null;
+        }
+
+        // ── Rumble (motor speeds on the virtual device) ──
+
+        private static float s_rumbleLow;
+        private static float s_rumbleHigh;
+        private static double s_rumbleEndTime;
+
+        /// <summary>
+        /// Trigger rumble on the virtual gamepad for a duration.
+        /// Frequencies are clamped to 0-1; duration &lt;= 0 stops immediately.
+        /// </summary>
+        public static void SetRumble(float lowFreq, float highFreq, float duration)
+        {
+            if (duration <= 0f)
+            {
+                StopRumble();
+                return;
+            }
+
+            var low = Mathf.Clamp01(lowFreq);
+            var high = Mathf.Clamp01(highFreq);
+
+            VirtualGamepad.SetMotorSpeeds(low, high);
+
+            s_rumbleLow = low;
+            s_rumbleHigh = high;
+            s_rumbleEndTime = Time.unscaledTimeAsDouble + duration;
+        }
+
+        /// <summary>Stop rumble and clear the motor speeds.</summary>
+        public static void StopRumble()
+        {
+            VirtualGamepad.SetMotorSpeeds(0f, 0f);
+            s_rumbleLow = 0f;
+            s_rumbleHigh = 0f;
+            s_rumbleEndTime = 0d;
+        }
+
+        /// <summary>
+        /// Per-frame auto zeroing — stops the rumble once the duration has elapsed.
+        /// Hooked into MCPBridge.Update / InstanceUpdate.
+        /// </summary>
+        public static void TickRumble()
+        {
+            if (s_rumbleEndTime > 0d && Time.unscaledTimeAsDouble >= s_rumbleEndTime)
+                StopRumble();
+        }
+
+        /// <summary>Current rumble state: active flag, low motor speed, high motor speed.</summary>
+        public static (bool active, float low, float high) GetRumbleState()
+        {
+            if (s_rumbleEndTime > 0d)
+                return (true, s_rumbleLow, s_rumbleHigh);
+            return (false, 0f, 0f);
         }
 
         // ── Apply multiple button operations ──

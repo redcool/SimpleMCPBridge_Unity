@@ -127,7 +127,7 @@ server keeps only the most recent one.
 | `input.key_press` | Simulate keyboard key — tap/hold/release (Input System) | All |
 | `input.touch` | Touch simulation: tap, start, move, end (virtual Touchscreen, Input System) | All |
 | `input.swipe` | Async smooth swipe/drag gesture from one point to another over time | All |
-| `input.gamepad` | Gamepad control: button tap/press/release, axis, batch set, reset, state query | All |
+| `input.gamepad` | Gamepad control: button tap/press/release, axis, batch set, reset, state query, rumble 震动 | All |
 | `input.get_state` | Query all current input states (tracked keys/mouse position/gamepad) | All |
 | `input.action` | Unified input: keys + mouse + axes + scroll in one call | All |
 | `ui.get_texts` | Read on-screen UI text from memory (no OCR) — Text + TMP | All |
@@ -311,6 +311,17 @@ The bridge ID is generated in the `MCPBridge.BridgeId` property. Each
 connection gets a unique ID. Both the server and the window UI display it
 for multi-bridge tracking.
 
+**⚠️ Bridge ID 每次重连都会变化**（每次连接生成新 GUID，非持久）。断线
+重连（如 app 崩溃重启、域重载、进出 Play Mode、重新安装包）后，旧 ID
+立即失效，`bridge.call` 用旧 ID 会报 `Bridge '<id>' not found`。调用前
+必须先重新获取：
+
+- `GET /health` → 每个 bridge 的 `id`（当前真实 ID）
+- 或 `bridge.list` → 各 bridge ID/IP
+
+正确调用模式：**先查 /health 拿最新 ID，再发 `bridge.call`**，不要缓存
+或手写 ID。AGENTS.md Known Issues #6 的多 bridge 路由也依赖此行为。
+
 ## WebSocket Impl (Unity Side)
 
 - **Active transport:** `NetWebSocketClient` (wraps .NET's `ClientWebSocket`) — created in
@@ -444,7 +455,9 @@ When `RequirePlayMode = true`, the tool is only registered when the Unity applic
 | `set` | `buttons`[], `axes`{} | 批量操作 |
 | `reset` | — | 全部归零 |
 | `state` | — | 查询当前状态 |
+| `rumble` | `lowFreq`, `highFreq`, `duration` | 触发震动（虚拟设备仅写状态，不物理震动） |
 
+- 震动感知不在此工具——AI 侧用 `game.watch` 监听游戏暴露的震动相关属性
 - Button names: `south`/`a`, `east`/`b`, `north`/`x`, `west`/`y`, `leftShoulder`/`lb` 等
 - Axis names: `leftStickX`, `leftStickY`, `rightStickX`, `rightStickY`, `leftTrigger`, `rightTrigger`
 - 底层: `InputSystem.QueueStateEvent(Gamepad.current, GamepadState{...})`
@@ -567,3 +580,15 @@ Unity AB 去重机制: 相同内容的 AB 只能被 `LoadFromMemory` 加载一�
 **根因**: Unity 拒绝在编译错误状态下进入 Play Mode。`editor.get_console` 最近 50 条可能全是 Log（编译错误在更早位置），被误导为「无报错」。
 
 **排查**: 直接搜 console 的 `error CS`（或查 `$env:LOCALAPPDATA\Unity\Editor\Editor.log`）确认编译状态，先修编译错误再进 Play Mode。
+
+### 10. Android 触摸工具崩溃 — URP DebugUpdater + EnhancedTouch SIGSEGV（已修复）
+
+**现象**: Android 上 `input.touch`（start→move→end 序列的 end/move 阶段）或 `input.swipe` 后紧跟 `input.mouse_click` 会让 **App 进程崩溃 → bridge 断开**（server.log: `Bridge disconnected` + `Rejected 1 pending tool call`，重连空窗 >3s = 进程已死需手动重启）。`input.key_press` / `input.click_screen`（EventSystem 路径）/ `uitk.*` / scene/physics 工具不受影响。仅 Development build / Editor 复现。
+
+**根因**: URP `DebugUpdater.Update()` 每帧调用 `DebugManager.GetActionToggleDebugMenuWithTouch()` → 读 `Touch.activeTouches`（3 指 debug 菜单手势检测）。唯一 gate 是 `if (!EnhancedTouchSupport.enabled) return false;`，而 `DebugUpdater.EnableRuntime()` 在 `RuntimeInitializeLoadType.AfterSceneLoad` 调用了 `EnhancedTouchSupport.Enable()`，gate 恒开。虚拟 Touchscreen（`InputSystem.AddDevice<Touchscreen>("VirtualAgentTouch")` + `QueueStateEvent`）的合成事件流破坏 EnhancedTouch 的历史不变量（`Debug.Assert(currentTouchState != null, "Must have current touch record at this point")`，InputSystem 1.7.0 Touch.cs L783），Development build 下 assert 不中断 → null 解引用 → **SIGSEGV（fault addr 0x20）** → 进程死亡 → bridge 断开。URP `DebugUpdater` 本体是 `#if DEVELOPMENT_BUILD || UNITY_EDITOR`，Release build 永不创建。
+
+**修法**（已固化在 `Runtime/UrpDebugGuard.cs`）: `[RuntimeInitializeOnLoadMethod(BeforeSceneLoad)]` 将 `DebugManager.instance.enableRuntimeUI` 设为 `false` —— DebugUpdater 在 `AfterSceneLoad` 创建时检查 `enableRuntimeUI`，提前关掉后 DebugUpdater 永不被创建，`Touch.activeTouches` 不再被每帧轮询。仅用公共 API，不动 TouchDeviceTools/InputHandler/MouseDeviceTools 注入逻辑（崩溃在 URP 侧，不在注入侧）。
+
+**影响**: URP runtime debug UI（3 指手势）一并被禁用 —— 对自动化测试场景是预期行为。
+
+**参考**: InputSystem Touch.cs assert commit `33e45e5` / case `1230756`。
