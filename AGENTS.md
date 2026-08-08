@@ -592,3 +592,35 @@ Unity AB 去重机制: 相同内容的 AB 只能被 `LoadFromMemory` 加载一�
 **影响**: URP runtime debug UI（3 指手势）一并被禁用 —— 对自动化测试场景是预期行为。
 
 **参考**: InputSystem Touch.cs assert commit `33e45e5` / case `1230756`。
+
+### 11. `scene.set_component_property` 对 il2cpp 裁剪的 setter 报 not found（非桥 bug，工程侧需引用 setter）
+
+**现象**: Android（il2cpp 构建）上 `scene.set_component_property` 对 `Rigidbody.mass`/`drag` 等属性报
+`Property/field 'mass' not found on Rigidbody`，但 `scene.get_component_properties` 能列出该属性并读到值。
+同一调用在 **Editor bridge 上成功**（同源码、同场景）。
+
+**根因**: il2cpp 发包时的 Managed Stripping（代码裁剪）会删除**工程从未引用过的 setter**。属性对象仍在
+（getter 被保留，所以 get 侧枚举能看到值），但 setter 被 linker 删除 → 反射 `CanWrite=false` →
+`GetProperty(name)` 命中但写入被拒 → 落入 `m_` 字段兜底也失败 → 报 not found。这是**预期行为，非桥 bug**，
+任何反射方式都无法写入被裁剪的 setter。诊断特征：同一 Android 包上 `get_component_properties` 的
+`propertyCount` 远小于 Editor（实测 Rigidbody 9 vs 51），即大量未引用成员已被裁剪。
+
+**验证实验**（已确认根因）: 在测试工程任意代码（如 `PlayerMove.Start()`）显式调用一次
+`rb.mass = 5f` → linker 检测到使用即保留 setter → 重新发包后：
+- Start 中 mass 初值生效（=5）
+- `scene.set_component_property` 写 mass **恢复成功**（set 7 → get 7）
+- 未引用的对照属性（`drag`）**仍然 not found** —— 证明裁剪假设成立
+
+**解决**: 工程侧三选一 ——
+1. **引用一次 setter**（最简）: 工程代码里调一次 `rb.mass = rb.mass`（或设实际值），linker 即保留
+2. **降低 stripping**: Player Settings → Other Settings → Managed Stripping Level → Low/Disabled（影响包大小）
+3. **link.xml 保留**: 工程 Assets 加 link.xml 保留对应类型（如 `UnityEngine.CoreModule` 的 `UnityEngine.Rigidbody`）
+
+**排查指引**: 遇到 `set_component_property` 对某属性报 not found 但 get 能读到 → 先对照 Editor bridge
+同调用是否成功 + 对比两端的 `propertyCount` → 若 Editor 成功且 Android 裁剪严重，即本问题，按上述工程侧
+方案解决；若 Editor 也失败，才是桥代码问题（可查 SceneHandler.cs `SetComponentProperty` 的 field/property/
+枚举回退/`m_` 兜底四段查找链）。
+
+**注**: `SceneHandler.SetComponentProperty` 已含 il2cpp 防御性枚举回退分支（`GetProperties()` + 
+`OrdinalIgnoreCase` 匹配 + `CanWrite` + 非索引器），用于"属性存在且可写但 `GetProperty(name)` 按名查找
+失败"的反射差异场景；setter 被裁剪（`CanWrite=false`）的场景该分支同样无法命中，需工程侧保留 setter。

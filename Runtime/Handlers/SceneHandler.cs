@@ -378,6 +378,23 @@ namespace SimpleMCPBridge.Runtime.Handlers
                 return JsonHelper.BuildJsonObject(("success", "true"));
             }
 
+            // il2cpp fallback: GetProperty(name) can return null even when the property
+            // is present (reflection trimming in il2cpp builds). Enumerate all public
+            // instance properties and match case-insensitively.
+            var propFallback = component.GetType()
+                .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .FirstOrDefault(p =>
+                    string.Equals(p.Name, propertyName, StringComparison.OrdinalIgnoreCase) &&
+                    p.CanWrite &&
+                    p.GetIndexParameters().Length == 0);
+            if (propFallback != null)
+            {
+                SceneObjectTools.UndoRecord(component, $"Set {propertyName}");
+                var typedValue = SceneObjectTools.ConvertValue(rawValue, propFallback.PropertyType);
+                propFallback.SetValue(component, typedValue);
+                return JsonHelper.BuildJsonObject(("success", "true"));
+            }
+
             // Try finding a serialized property by name convention
             // (Unity often serializes with 'm_' prefix or different casing)
             var altName = $"m_{propertyName}";
