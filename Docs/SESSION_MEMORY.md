@@ -9,9 +9,17 @@
 - **UPM 包化已完成迁移**:包位于 `H:\ai_works\SimpleMCPBridge`(独立 git 仓库),项目 `Packages/manifest.json` 用 `file:../../SimpleMCPBridge` 引用
 - 连接架构咨询已闭环:确认**保持短连接现状**(agent 侧走 `/rpc` HTTP 短连接,不切 SSE/WS 长连接)
 - ✅ 本轮（2026-08）已完成:黑名单/白名单调用权限 + CRUD 补齐 + 服务端/桥侧安全与性能修复 + 全部活体验证 + 文档补写（AGENTS/README/Server README/本文件）——待用户提交
+- ✅ 本轮（2026-08）Android 活体测试轮已完成:URP DebugUpdater 崩溃修复(UrpDebugGuard) + Android 91 工具全量实测(A/B/C 类全过) + il2cpp setter 裁剪根因确认(Known Issue #11) + Bridge ID 每连接变化文档化——待用户提交
 
 ## 完成项 (Completed)
 
+- [x] 2026-08 **URP DebugUpdater 崩溃修复（UrpDebugGuard, Known Issue #10）** — 新文件 `Runtime/UrpDebugGuard.cs`: `[RuntimeInitializeOnLoadMethod(BeforeSceneLoad)]` 设 `DebugManager.instance.enableRuntimeUI=false` → DebugUpdater(AfterSceneLoad 创建)永不被创建 → EnhancedTouch 历史不变量不再被虚拟 Touchscreen 合成事件破坏 → 消除 SIGSEGV(fault addr 0x20);仅公共 API,不动注入逻辑;asmdef 加 `Unity.RenderPipelines.Core.Runtime` 软引用 + `RENDER_PIPELINES_CORE_ON` versionDefine
+  - 验证(Android 真机新包): input.touch start/move/move/end + input.swipe + input.mouse_click 全跑,bridge 存活 1500s+ 零崩溃(logcat 无 SIGSEGV/无 "Must have current touch record")
+- [x] 2026-08 **Android 91 工具全量活体测试（A/B/C 类, 10.0.46.187）** — A 类 input.* + game.* 全过(input.action WASD 驱动 Player、game.set_time_scale/wait/do_sequence/sequence_status/watch+get_delta/batch 2:1 RTT/spatial/entities/animator_state);B 类 scene.* + physics.* 全过(get_objects/by_type/by_path/by_tag、create/delete/duplicate/rename/set_active/set_parent/add/remove_component/set_component_property(Transform OK)/set_transform/call_component_method/load_scene(instanceId 失效警告符合预期) + box/sphere_cast/overlap_sphere/overlap_box);C 类 recording.reset/status + camera.screenshot(savePath 必需,落盘 428KB)
+  - 参数坑(实测确认): call_component_method 用 `args` 命名映射且**必须给全重载参数**(AddForce 需 force+mode); box_cast/overlap_box 参数名是 `halfExtents` 不是 size; rename 用 `name`; camera.screenshot 需 `savePath`; game.set_time_scale 用 `value`
+- [x] 2026-08 **il2cpp setter 裁剪根因确认（Known Issue #11）** — `set_component_property` 对 Rigidbody.mass/drag 报 not found 但 get 能读:il2cpp Managed Stripping 裁剪工程未引用的 setter → `CanWrite=false`(propertyCount Android 9 vs Editor 51)。验证实验:PlayerMove.Start 显式 `rb.mass=5f` → 新包 mass 初值 5 且 set 成功(drag 仍失败);验证后 PlayerMove.cs 已还原
+  - SceneHandler.SetComponentProperty 已加 il2cpp 防御性枚举回退分支(GetProperties + OrdinalIgnoreCase + CanWrite + 非索引器)——对"属性可写但按名查找失败"有效;对 setter 被裁剪(CanWrite=false)无效属预期,需工程侧保留 setter
+- [x] 2026-08 **Bridge ID 每连接变化文档化** — AGENTS.md `## BridgeId per Connection` 下补说明:ID 每重连新生成(非持久),旧 ID 立即失效报 `Bridge '<id>' not found`;调用前先 GET /health 或 bridge.list 取最新 ID,勿缓存
 - [x] 2026-08 **scene.call_component_method 黑名单/白名单（文件化）** — BridgeConfig.ConfigData 加 `methodBlocklist`/`methodAllowlist`(SanitizeList + 静态缓存);SceneHandler 四步门:代码默认黑名单(6 项,destroy/destroyimmediate/destroyobject/quit/quitimmediate/disconnect,不可移除)→ 配置追加黑名单 → 命名空间守卫(SimpleMCPBridge)→ 白名单模式(空=关闭,非空=只放行命中项,支持 `MethodName`/`TypeName.MethodName`,OrdinalIgnoreCase);`EnsureMethodAccessCache` 懒缓存重启生效;Resources/bridge-config.json 加两个空数组
   - 验证(活体):配置追加 `Camera.ResetAspect` → blocked ✅;白名单模式放行 ✅;代码默认 Destroy 仍 blocked ✅;测试项目配置已还原
 - [x] 2026-08 **CRUD 补齐（12 工具,ora-1 P0/P1 全覆盖）** — P0 `scene.load_scene`(Editor 打开资产/Play 与 built 用 SceneManager,single/additive,异步;⚠ 加载后 instanceIds 全失效需重取层级)、`scene.save_prefab`(PrefabUtility.SaveAsPrefabAsset,覆盖式);新 PlayerPrefsHandler(`playerprefs.get_all/get/set/delete` — Unity 无 key 枚举 API,会话级 key 注册表,set/get 时登记);AssetHandler 4 新工具 `asset.create/delete/rename/move`(delete 带 find_references 引用预检 + force 门);UIToolkitHandler 2 新工具 `uitk.create_element/remove_element`(运行时元素,**不持久**,面板刷新即毁/即恢复)
@@ -73,11 +81,13 @@
 
 ## 进行中 (Active)
 
-- (无重大进行项——本轮修复全部完成并验证，文档已补写)
+- (无重大进行项——本轮修复全部完成并验证，文档已补写;Android 活体测试轮也全部完成并验证)
 
 ## 下一步 (Next Move)
 
 - **待办: 两个仓库提交由用户执行**(桥 `H:\ai_works\SimpleMCPBridge` + 服务端 `H:\ai_works\SimpleMcpServer` 均故意丢脏树)
+  - 本轮(Android 测试轮)桥侧未提交改动:`Runtime/UrpDebugGuard.cs`(新文件,URP 崩溃防护)、`Runtime/Handlers/SceneHandler.cs`(SetComponentProperty il2cpp 枚举回退分支)、`SimpleMCPBridge.asmdef`(Core.Runtime 软引用 + versionDefine)、`AGENTS.md`(Known Issue #10/#11 + BridgeId 变化说明)
+  - 测试工程 `TestAIMcpPrj` PlayerMove.cs 验证代码已还原(无残留改动)
 - **提醒: 轮换 git 历史残留的 LLM API key**——真实 key 曾提交到 SimpleMcpServer git 历史(如 98d601e),config.json 已被 .gitignore 排除;改用环境变量 `LLM_API_KEY` 覆盖(index.ts 已支持)后轮换
 - **可选优化**:
   - package.json 后续补充 `dependencies` 声明(如 com.unity.inputsystem 1.14.2 / com.unity.textmeshpro / com.tasharen.ngui),让 Unity 自动解析
@@ -103,7 +113,11 @@
 
 ## 最近踩坑 (Recents Pitfalls)
 
-> 已固化到 AGENTS.md Known Issues 的:MPEG4Writer 音频轨道(1)、BuildJsonObject 字符串预引号(2)、InputSystem.Update 阻塞(3)、服务器需可见 cmd 窗口(5)、多 Bridge 路由 Editor(6)、同内容 AB 只能加载一次(7)
+> 已固化到 AGENTS.md Known Issues 的:MPEG4Writer 音频轨道(1)、BuildJsonObject 字符串预引号(2)、InputSystem.Update 阻塞(3)、服务器需可见 cmd 窗口(5)、多 Bridge 路由 Editor(6)、同内容 AB 只能加载一次(7)、uitk.click 隐藏 gate(8)、编译错误静默阻断 Play Mode(9)、URP DebugUpdater+EnhancedTouch SIGSEGV(10)、il2cpp setter 裁剪(11)
+
+- **Bridge ID 每次重连都会变**:ID 每连接新生成(非持久),重连后旧 ID 立即失效报 `Bridge '<id>' not found`。调用前先 `GET /health` 或 `bridge.list` 取最新 ID,勿缓存/勿手写(本会话因过期 ID 多次踩坑)
+- **il2cpp setter 裁剪使 set_component_property 报 not found(非桥 bug)**:Android 上对工程未引用的属性(如 Rigidbody.mass/drag)报 not found,但 get 侧能读到值;Editor 同调用成功。诊断:对比两端 propertyCount(Android 9 vs Editor 51)。解决:工程侧引用一次 setter(`rb.mass = rb.mass`)/降低 stripping/link.xml 保留
+- **call_component_method 重载参数必须给全**:`args` 命名映射 + 完整重载参数(如 AddForce 需 `force`+`mode`,缺 mode 报 "Missing required argument")。box_cast/overlap_box 参数名是 `halfExtents`(不是 size);camera.screenshot 需 `savePath`;game.set_time_scale 用 `value`
 
 - NGUI 符号定义 ≠ 类型可解析:versionDefines 加 `NGUI_ON` 只是定义符号,还必须 asmdef `references` 含 `"NGUI"` 才能解析类型,否则 CS0246
 - 长连接隐患:Unity 重开 → opencode MCP 断连 → 必须重开 opencode → 会话记忆丢失(已用本文件规避)
@@ -122,8 +136,9 @@
 | `H:\ai_works\SimpleMcpServer\src\index.ts` | WS 服务器(679)、/rpc(1250)、/sse+/mcp(979-1005)、来源标注(268-294)、last-wins(754-765)、failover(879-917)、allowedIps gate(118-182)、template 自动复制(150-161)、maxPayload 4MB(713)、pong 跟踪(719-736) |
 | `H:\ai_works\SimpleMcpServer\config.json.template` | 完整配置模板(allowedIps 默认本机 + llm 段 + evalEnabled) |
 | `Runtime/BridgeClient.cs` | NetWebSocketClient(135)、BridgeId=GUID(43)、DrainQueue 帧预算(214-229) |
+| `Runtime/UrpDebugGuard.cs` | (新,2026-08)URP DebugUpdater 崩溃防护 —— BeforeSceneLoad 关 enableRuntimeUI,Known Issue #10 |
 | `Runtime/Config/BridgeConfig.cs` | ConfigData.methodBlocklist/methodAllowlist + SanitizeList + 静态缓存 |
-| `Runtime/Handlers/SceneHandler.cs` | LoadScene(1004)/ResolveScenePath(已修 bug)、SavePrefab(1345)、方法四重门(EnsureMethodAccessCache) |
+| `Runtime/Handlers/SceneHandler.cs` | LoadScene(1004)/ResolveScenePath(已修 bug)、SavePrefab(1345)、方法四重门(EnsureMethodAccessCache)、SetComponentProperty il2cpp 枚举回退分支(381-396) |
 | `Runtime/Handlers/PlayerPrefsHandler.cs` | playerprefs.* 4 工具(会话级 key 注册表) |
 | `Runtime/Handlers/AssetHandler.cs` | asset CRUD + build_bundle(Editor,#if UNITY_EDITOR) |
 | `Runtime/Handlers/UIToolkitHandler.cs` | uitk.create_element(320)/remove_element(400) |
