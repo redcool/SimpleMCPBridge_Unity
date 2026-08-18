@@ -42,7 +42,7 @@ SimpleMCPBridge 的设计理念是 **structured memory query**（结构化内存
 
 > `camera.screenshot` 仅作为**辅助手段**（调试、确认视觉布局），不是感知游戏状态的主路径。所有游戏状态都应从 Unity 对象的组件属性中直接读取。
 
-**工具类别机制**：95+ 个工具按类别组织（`[Scene]`/`[Ui]`/`[Ngui]`/`[Input]`/`[Game]`…），
+**工具类别机制**：127 个工具按类别组织（`[Scene]`/`[Ui]`/`[Ngui]`/`[Input]`/`[Game]`…），
 并支持运行时**按类别动态开关**（`tools.enable` / `tools.disable`）——只注册当前
 任务需要的工具集，减少 token 消耗。详见下文「工具类别与动态注册」章节。
 
@@ -79,15 +79,20 @@ Assets/
 │   │   ├── WebSocketInterfaces.cs   # WebSocket 接口抽象
 │   │   ├── Config/
 │   │   │   └── BridgeConfig.cs      # 配置加载（Editor/Player）
-│   │   ├── Handlers/       # 工具处理器（17+ Handler，95+ 个工具）
+│   │   ├── Handlers/       # 工具处理器（17+ Handler，127 个工具）
 │   │   │   └── NguiHandler.cs   # NGUI 工具（#if NGUI_ON 条件编译，未装 NGUI 不注册）
 │   │   ├── Tools/          # 工具辅助类
 │   │   └── Models/
 │   ├── Editor/
-│   │   └── MCPBridgeEditor.cs       # Tools > SimpleMCPBridge 窗口
+│   │   └── MCPBridgeEditor.cs       # MCPBridge 组件 Inspector（CustomEditor，非窗口）
+│   ├── Prefabs/
+│   │   └── MCPBridge.prefab         # 预置组件（默认 127.0.0.1:45678，自动重连）
 │   ├── Plugins/             # 依赖 DLL（已含仓库内，clone 即可用）
-│   ├── bridge-config.json   # IP/Port/加密配置
+│   ├── Resources/
+│   │   └── bridge-config.json   # 包内兜底配置（Editor/Player 首次自动拷贝的来源）
 │   └── SimpleMCPBridge.asmdef  # 程序集定义（含 versionDefines）
+├── SimpleMCPBridge-config/   # 项目本地配置（首次启动自动生成，不在包内）
+│   └── bridge-config.json    # Editor 用 IP/Port/加密配置
 ├── ...
 ```
 
@@ -132,12 +137,14 @@ https://github.com/CyberAgentGameEntertainment/InstantReplay.git?path=Packages/j
 ## 使用方法
 
 1. 启动 MCP Server（双击 `SimpleMcpServer/start.bat`）
-2. 用 Unity 打开项目
-3. 菜单栏 → **Tools → SimpleMCPBridge**
-4. 填写 Server IP/Port（默认 `127.0.0.1:45678`）
-5. 点击 **Connect to Server**
+2. 用 Unity 打开项目，把 `Assets/SimpleMCPBridge/Prefabs/MCPBridge.prefab` 拖进场景
+   （或给任意 GameObject 添加 `MCPBridge` 组件）
+3. 选中该物体，Inspector 内显示连接状态/Bridge ID/错误面板，以及 Server IP/Port
+   字段和 Connect 按钮（默认 `127.0.0.1:45678`）
+4. 点击 **Connect**（若勾选 Auto Reconnect，断线自动重连）
 
-Bridge 生命周期独立于窗口：关闭窗口后 bridge 继续运行，进出 Play Mode 自动重连。
+MCPBridge 是 `[ExecuteAlways]` 组件：Edit Mode / Play Mode / 构建后的 Player 均可用；
+勾选 Dont Destroy On Load 后跨场景存活，进出 Play Mode 自动重连。
 
 ## 配置
 
@@ -151,9 +158,11 @@ Bridge 生命周期独立于窗口：关闭窗口后 bridge 继续运行，进�
 }
 ```
 
-配置加载策略：
-- **Editor** — 直接从项目文件读取
-- **Player** — 首次从 `Resources` 拷贝到 `Application.persistentDataPath`
+配置加载策略（`BridgeConfig.cs`，首次自动生成、已存在不覆盖）：
+- **Editor** — 项目 `Assets/SimpleMCPBridge-config/bridge-config.json`，首次自动从包内
+  `Resources/bridge-config.json` 拷贝生成；用户可改，重启生效
+- **Player** — `Application.persistentDataPath/bridge-config.json`，逻辑同上
+- **兜底** — 包内 `Resources/bridge-config.json` 内嵌默认值
 
 `scene.call_component_method` 权限字段（可选，需重启生效）：
 - `methodBlocklist` — 追加拦截项（`"MethodName"` 或 `"TypeName.MethodName"`，大小写不敏感）；代码默认 6 项
@@ -226,7 +235,7 @@ Bridge 生命周期独立于窗口：关闭窗口后 bridge 继续运行，进�
 | 工具 | 参数 | 说明 |
 |------|------|------|
 | `editor.request_compile` | — | 触发 Unity 脚本重新编译。通过最小化→恢复 Editor 窗口来触发 Unity 事件处理，确保编译可靠启动 |
-| `editor.open_window` | `menuPath`(必填) | 按菜单路径打开 Unity Editor 窗口（如 `"Tools/SimpleMCPBridge"`、`"Window/General/Console"`）。菜单项不存在时返回错误 |
+| `editor.open_window` | `menuPath`(必填) | 按菜单路径打开 Unity Editor 窗口（如 `"Window/General/Console"`）。菜单项不存在时返回错误 |
 | `editor.window_focus` | `action`(必填) | 通过 Win32 API 控制 Unity Editor 窗口状态。action: `minimize`/`restore`/`focus`/`maximize`/`get_state`。`get_state` 返回 `{state: 'normal'\|'minimized'\|'maximized'\|'hidden'}` |
 | `editor.eval` | `code`(必填) | **编译并执行 C# 代码**（Mono.CSharp in-memory，即时，无 domain reload）。变量跨调用保持。预导入：System、System.Linq、System.Collections.Generic、UnityEngine、UnityEditor、UnityEngine.UI、UnityEngine.EventSystems。UnityEngine.Object 别名为 UnityObject。示例：`'GameObject.Find("Main Camera").transform.position.ToString()'` |
 | `editor.get_console` | `count`(默认50) | 获取最近的 Editor 控制台日志。返回 `{entries: [{message, stackTrace, type, time}], count: N}`。type 值：Log、Warning、Error、Exception、Assert |

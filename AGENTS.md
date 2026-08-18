@@ -21,14 +21,15 @@ Data flow: Agent (stdio) → MCP Server → WebSocket → Unity Bridge → Unity
 **Server (run from `H:\ai_works\SimpleMcpServer/`):**
 - `start.bat` — build + start
 - `start-quick.bat` — skip build, start (if dist/ is up to date)
-- `start-test.bat` — E2E test (spawns server, waits for bridge, calls tools)
+- `node tests\test-e2e.cjs` — E2E test (spawns server, waits for bridge, calls tools)
 - `npm run dev` — watch mode via tsx (no build needed)
 - `setup.bat` — first-time setup (node check + npm install + build)
 
 **Unity Bridge:**
-- Open via `Tools > SimpleMCPBridge`
-- IP/Port fields, Connect button, GUID display, error panel
-- Auto-connects on domain reload via [InitializeOnLoad]
+- 拖 `Prefabs/MCPBridge.prefab` 进场景（或给任意 GameObject 添加 `MCPBridge` 组件）
+- 选中后 Inspector 内联显示状态/Bridge ID/错误面板 + IP/Port 字段 + Connect 按钮
+- `[ExecuteAlways]` 三态可用（Edit/Play/Player）；isAutoReconnect 断线自动重连
+  （含进出 Play Mode、域重载、场景切换）
 
 ## Port Conflicts (Common)
 
@@ -48,7 +49,7 @@ server keeps only the most recent one.
 - **Bridge (Editor):** 项目 `Assets/SimpleMCPBridge-config/bridge-config.json` — 首次自动从包内
   `Resources/bridge-config.json` 拷贝生成（不存在时创建，已存在则不覆盖）；用户可改，重启生效
 - **Bridge (Player):** `Application.persistentDataPath/bridge-config.json` — 同上逻辑
-- 兜底: 包内 `Runtime/Resources/bridge-config.json` 内嵌默认值
+- 兜底: 包内 `Resources/bridge-config.json` 内嵌默认值
 - Both use the same format. Cloud deployment: server `ip: "0.0.0.0"`.
 - `scene.call_component_method` 权限字段（可选，需重启生效）：
   - `methodBlocklist`: 数组，追加拦截项（`"MethodName"` 或 `"TypeName.MethodName"`，大小写不敏感）；代码默认 6 项
@@ -440,7 +441,7 @@ compilation error — check `editor.get_console` for details.
 | `Runtime/Handlers/PlayerPrefsHandler.cs` | PlayerPrefs tools (get_all/get/set/delete — Unity 无 key 枚举 API，会话级 key 注册表) |
 | `Runtime/Handlers/BuildingHandler.cs` | 项目特定 castle.click_building（Physics.Raycast + Lua FakeHitResultEvent） |
 | `Plugins/` | NuGet DLL 依赖（InstantReplay/UniEnc 需要，已含在仓库内）|
-| `bridge-config.json` | Bridge IP/port |
+| `Resources/bridge-config.json` | 包内兜底配置（Editor 首次自动拷贝到项目 `Assets/SimpleMCPBridge-config/`） |
 
 ## AssetBundle Lifecycle
 
