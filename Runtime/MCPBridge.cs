@@ -56,14 +56,28 @@ namespace SimpleMCPBridge.Runtime
                     DontDestroyOnLoad(gameObject);
             }
 
+            Initialize();
+            Debug.Log($"MCP Server {_serverIp}:{_serverPort}");
+        }
+
+        /// <summary>
+        /// Load config, acquire/create the shared BridgeClient, register AIRequest,
+        /// and (Editor) subscribe to compilation/play-mode events. Idempotent — safe
+        /// to call from both Awake and Update's null-bridge fallback. Event
+        /// subscriptions are -= then += guarded against duplicate registration.
+        /// Extracted from Awake so Update's recovery path doesn't re-run lifecycle
+        /// bits (DontDestroyOnLoad) that belong to the Unity Awake hook only.
+        /// </summary>
+        private void Initialize()
+        {
             SimpleMCPBridge.BridgeConfig.EnsureConfigOnDevice();
             SimpleMCPBridge.BridgeConfig.LoadConfig(out _serverIp, out _serverPort);
-            Debug.Log($"MCP Server {_serverIp}:{_serverPort}");
-            // Reuse or create the shared default bridge
-            _bridge = BridgeClient.Default ??= new BridgeClient();
+            if (_bridge == null)
+            {
+                _bridge = BridgeClient.Default ??= new BridgeClient();
+                Runtime.AIRequest.Register(_bridge);
+            }
             _bridge.IsAutoReconnect = isAutoReconnect;
-
-            Runtime.AIRequest.Register(_bridge);
 
 #if UNITY_EDITOR
             CompilationPipeline.compilationStarted -= OnCompilationStarted;
@@ -143,7 +157,7 @@ namespace SimpleMCPBridge.Runtime
             if (_bridge == null)
             {
                 if (isAutoReconnect)
-                    Awake();
+                    Initialize();   // was Awake() — Awake is a Unity lifecycle hook, not a reuse entry
                 return;
             }
 

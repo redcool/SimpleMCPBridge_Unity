@@ -19,9 +19,9 @@ namespace SimpleMCPBridge.Runtime.Handlers
     /// Encoding runs asynchronously — poll recording.status for completion.
     /// No external ffmpeg binaries required on any platform.
     ///
-    /// recording.* tools use [MCPTool(Platform = MCPToolPlatforms.Android | …)]
-    /// to skip registration on platforms where recording isn't meaningful,
-    /// without needing #if !UNITY_EDITOR guards. Methods are visible to VS.
+    /// recording.* tools use [MCPTool(Platform = MCPToolPlatforms.Android | iOS | Standalone | Editor,
+    /// RequirePlayMode = true)] to register on device builds AND Editor (Play Mode only), so they
+    /// are never visible in Edit Mode where there is no camera rendering to capture.
     /// </summary>
     [MCPToolClass]
     public class RecordingHandler
@@ -41,15 +41,16 @@ namespace SimpleMCPBridge.Runtime.Handlers
         private const int MAX_KEEP_FILES = 5;
 
         // ─── recording.start ──────────────────────────────────────────────
-        // Only registers on device builds (Android/iOS/Standalone) via Platform filter.
-        // Editor bridge skips registration so routing goes to device.
+        // Registers on device builds (Android/iOS/Standalone) AND Editor (Windows/macOS,
+        // InstantReplay supports Media Foundation / Video Toolbox natively). RequirePlayMode
+        // keeps it out of Edit Mode where there is no camera rendering to capture.
         [MCPTool(MCPMethodConst.START_RECORDING,
             "Start recording screen capture via CyberAgent InstantReplay (OS-native encoding). "
             + "Only works in Play Mode. "
             + "Params: width/height (default 1280x720), fps (default 30), "
             + "enableAudio (default false), quality 1-100 (default 50). "
             + "Returns success, outputPath, width, height, fps.",
-            Platform = MCPToolPlatforms.Android | MCPToolPlatforms.iOS | MCPToolPlatforms.Standalone)]
+            Platform = MCPToolPlatforms.Android | MCPToolPlatforms.iOS | MCPToolPlatforms.Standalone | MCPToolPlatforms.Editor, RequirePlayMode = true)]
         public static string StartRecording(string paramsJson)
         {
             lock (_stateLock)
@@ -139,7 +140,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             "Stop recording and finalize the MP4. "
             + "Returns immediately with status='encoding'. "
             + "Poll recording.status for completion and output file path.",
-            Platform = MCPToolPlatforms.Android | MCPToolPlatforms.iOS | MCPToolPlatforms.Standalone)]
+            Platform = MCPToolPlatforms.Android | MCPToolPlatforms.iOS | MCPToolPlatforms.Standalone | MCPToolPlatforms.Editor, RequirePlayMode = true)]
         public static string StopRecording(string paramsJson)
         {
             lock (_stateLock)
@@ -181,7 +182,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         [MCPTool(MCPMethodConst.GET_RECORDING_STATUS,
             "Get current recording/encoding status. "
             + "States: idle | recording | encoding | completed | error.",
-            Platform = MCPToolPlatforms.Android | MCPToolPlatforms.iOS | MCPToolPlatforms.Standalone)]
+            Platform = MCPToolPlatforms.Android | MCPToolPlatforms.iOS | MCPToolPlatforms.Standalone | MCPToolPlatforms.Editor, RequirePlayMode = true)]
         public static string GetStatus(string paramsJson)
         {
             lock (_stateLock)
@@ -334,7 +335,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
         /// Force-reset recording state. Use if export times out or gets stuck.
         /// </summary>
         [MCPTool("recording.reset", "Force-reset the recording system. Use if encoding gets stuck or times out. Cleans up all session state.",
-            Platform = MCPToolPlatforms.Android | MCPToolPlatforms.iOS | MCPToolPlatforms.Standalone)]
+            Platform = MCPToolPlatforms.Android | MCPToolPlatforms.iOS | MCPToolPlatforms.Standalone | MCPToolPlatforms.Editor, RequirePlayMode = true)]
         public static string ResetRecording(string paramsJson)
         {
             lock (_stateLock)

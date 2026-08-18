@@ -41,8 +41,10 @@ namespace SimpleMCPBridge.Runtime
         public string Host { get; private set; } = "127.0.0.1";
         public int Port { get; private set; } = 45678;
         public bool IsConnected => _client != null && _client.IsConnected;
-        /// <summary>Unique identifier for this Bridge instance.</summary>
-        public string BridgeId { get; set; } = Guid.NewGuid().ToString("N");
+        /// <summary>Unique identifier for this bridge instance. Set once on construction;
+        /// changing it externally would break server-side routing (toolToBridge keys on it),
+        /// so the setter is private. Server reads it via register_tools payload.</summary>
+        public string BridgeId { get; private set; } = Guid.NewGuid().ToString("N");
 
         /// <summary>
         /// Shared default bridge instance.
@@ -172,6 +174,20 @@ namespace SimpleMCPBridge.Runtime
         }
 
         /// <summary>
+        /// Apply payload encryption when the server has flagged encryption enabled.
+        /// Warns if the key is missing (server requires encryption but bridge has
+        /// no key configured). Returns the original message when encryption is off,
+        /// or the #ENC#-prefixed ciphertext when on. Shared by SendAsync/SendSafeAsync.
+        /// </summary>
+        private string EncryptIfNeeded(string message)
+        {
+            if (!_serverEncryptionEnabled) return message;
+            if (string.IsNullOrEmpty(SimpleMCPBridge.BridgeConfig.EncryptionKey))
+                LogWarning("Server requires encryption but no key configured in bridge-config.json");
+            return SimpleMCPBridge.EncryptionHelper.Encrypt(message, SimpleMCPBridge.BridgeConfig.EncryptionKey);
+        }
+
+        /// <summary>
         /// Send a raw message to the server asynchronously.
         /// Used by AIRequest to send ai_request messages.
         /// Encrypts payload if encryption is configured.
@@ -179,14 +195,7 @@ namespace SimpleMCPBridge.Runtime
         public async Task SendAsync(string message)
         {
             if (_client != null && _client.IsConnected)
-            {
-                if (_serverEncryptionEnabled && string.IsNullOrEmpty(SimpleMCPBridge.BridgeConfig.EncryptionKey))
-                    LogWarning("Server requires encryption but no key configured in bridge-config.json");
-                var msgToSend = _serverEncryptionEnabled
-                    ? SimpleMCPBridge.EncryptionHelper.Encrypt(message, SimpleMCPBridge.BridgeConfig.EncryptionKey)
-                    : message;
-                await _client.SendAsync(msgToSend);
-            }
+                await _client.SendAsync(EncryptIfNeeded(message));
             else
                 throw new InvalidOperationException("Client not connected");
         }
@@ -252,21 +261,14 @@ namespace SimpleMCPBridge.Runtime
         /// <summary>
         /// Fire-and-forget send with error logging.
         /// Takes the client reference explicitly to avoid race with external client swap.
-        /// Encrypts payload if encryption is configured.
+        /// Encrypts payload if encryption is configured (via EncryptIfNeeded).
         /// </summary>
         private async Task SendSafeAsync(IWebSocketClient client, string message)
         {
             try
             {
                 if (client != null && client.IsConnected)
-                {
-                    if (_serverEncryptionEnabled && string.IsNullOrEmpty(SimpleMCPBridge.BridgeConfig.EncryptionKey))
-                        LogWarning("Server requires encryption but no key configured in bridge-config.json");
-                    var msgToSend = _serverEncryptionEnabled
-                        ? SimpleMCPBridge.EncryptionHelper.Encrypt(message, SimpleMCPBridge.BridgeConfig.EncryptionKey)
-                        : message;
-                    await client.SendAsync(msgToSend);
-                }
+                    await client.SendAsync(EncryptIfNeeded(message));
             }
             catch (Exception ex)
             {

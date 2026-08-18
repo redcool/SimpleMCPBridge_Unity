@@ -62,7 +62,26 @@ server keeps only the most recent one.
 - **Server stderr:** `SimpleMcpServer/server.err`
 - **Unity Editor log:** `$env:LOCALAPPDATA\Unity\Editor\Editor.log`
 
-## Tools (117)
+## editor.eval 安全说明
+
+`editor.eval` 通过 Mono.CSharp 动态编译并在内存中执行任意 C# 代码 —— 等同于完全的 Unity/机器控制（读写任意文件、删除资产、网络访问、启动进程等）。这是 MCP 工具集最强的"逃生舱":当某个场景操作没有专用工具覆盖时,AI 可用 eval 即时补救。
+
+**默认 ON,以用户方便为先**。开发调试、快速原型、补救缺口工具时即时可用,不必先翻配置。若你的环境不可信（共享机器/公网暴露的服务器),关闭它。
+
+**双重 gate（任一关闭即不可用）**:
+- **Server 侧 `config.json` → `evalEnabled`**（默认 `true`）:`false` 时 `tools/list` 不暴露 `editor.eval` 给 agent,agent 看不到也就调不到。
+- **Bridge 侧 `EditorPrefs SimpleMCPBridge_EvalEnabled`**（默认 `true`）:执行前再检查一次;可用 MCPBridge Inspector 的 toggle 切换。
+
+**风险面**:任何能调用 `/rpc` 的 AI 都能执行任意代码。本工具**不做代码内容过滤**（任意代码无法穷举拦截,黑名单无意义）。安全靠网络层 gate —— `allowedIps` 白名单默认仅本机（`127.0.0.1`/`::1`）。云部署（`ip:0.0.0.0`）前务必扩白名单到可信 IP 段,或直接 `evalEnabled:false`。
+
+**与 `scene.call_component_method` 权限的区别**:后者有方法名黑/白名单（可枚举拦截);eval 是任意代码,只能靠网络层 gate,无方法级过滤。
+
+**关闭方法**（任一即可）:
+- `SimpleMcpServer/config.json` 设 `"evalEnabled": false`（重启 server 生效,对所有 agent 隐藏）
+- Unity Editor: MCPBridge Inspector 的 eval toggle（立即生效,单机）
+- 代码:`EditorPrefs.SetBool("SimpleMCPBridge_EvalEnabled", false)`
+
+## Tools (127)
 
 | Tool | What it does | Platform |
 |------|-------------|----------|
@@ -84,7 +103,7 @@ server keeps only the most recent one.
 | `scene.get_component_properties` | Get all serializable properties + current values | All |
 | `scene.add_component` | Add component by type name | All |
 | `scene.remove_component` | Remove a component from a GameObject | All |
-| `scene.instantiate_prefab` | Instantiate a prefab from project Assets | Editor |
+| `scene.instantiate_prefab` | Instantiate a prefab from project Assets (PrefabUtility.InstantiatePrefab — 保留 prefab 关联,实例改动传导 prefab;材质资产化依赖此关联推断同级目录) | Editor |
 | `scene.save_current` | Save current scene | Editor |
 | `scene.load_scene` | Load a scene (Editor: open asset; Play/built: SceneManager, single/additive) — ⚠ after load ALL instanceIds go stale, re-fetch hierarchy | All |
 | `scene.save_prefab` | Save a GameObject (instanceId/path) as a prefab asset (overwrites existing) | Editor |
@@ -97,8 +116,18 @@ server keeps only the most recent one.
 | `physics.sphere_cast` | Sweep a sphere along direction, return first hit | All |
 | `physics.overlap_sphere` | All colliders within a sphere (name, instanceId, path, position, tag, layer) | All |
 | `physics.overlap_box` | All colliders within a box (optional rotation) | All |
-| `camera.screenshot` | Capture main camera view and save as PNG (root: Editor→Project/VideoRecord, Runtime→tempCache/VideoRecord) | All |
+| `camera.screenshot` | Capture main camera view and save as PNG (savePath 可选,省略自动生成时间戳文件名; root: Editor→Project/VideoRecord, Runtime→tempCache/VideoRecord) | All |
 | `audio.get_sources` | List all playing AudioSources (clipName, volume, isPlaying, time, loop, spatialBlend, position, distanceFromListener, path, instanceId) | All |
+| `particle.get_systems` | List all ParticleSystems + live state (isPlaying/isEmitting/particleCount/time/enabledModules/renderer) | All |
+| `particle.get_state` | Detailed state + config of one ParticleSystem (main/emission/shape values) | All |
+| `particle.create` | Create GameObject + ParticleSystem with optional initial config + material (builtin name or Assets/... path, Editor 下内置名自动落地为特效资产同目录的磁盘 .mat) + shader (可选,缺省 URP Simple Lit) (Edit Mode, undoable) | All |
+| `particle.set` | Set module property via typed code path (main/emission/shape/.../renderer, incl. material + shader 换材质 shader; curve/gradient/burst syntax; Edit+Play, undoable) | All |
+| `particle.simulate` | Deterministic preview to time t (works in Edit Mode) | All |
+| `particle.play` | Play (optional restart) | All(Play Mode) |
+| `particle.pause` | Pause (particles freeze) | All(Play Mode) |
+| `particle.stop` | Stop (optional clear) | All(Play Mode) |
+| `particle.clear` | Clear all particles without stopping | All(Play Mode) |
+| `particle.emit` | One-shot burst via EmitParams (position/velocity/color/size, works without playing) | All(Play Mode) |
 | `nav.query_path` | Find path between two points on NavMesh (reachable, status, waypoints, distance) | All |
 | `nav.sample_position` | Snap world position to nearest NavMesh point | All |
 | `nav.has_navmesh` | Check if NavMesh exists (hasNavMesh, vertexCount, triangleCount) | All |
@@ -168,10 +197,10 @@ server keeps only the most recent one.
 | `playerprefs.set` | Set PlayerPrefs value (optional `valueType`, auto-detected from JSON type; `save`=true default) | All |
 | `playerprefs.delete` | Delete a PlayerPrefs key | All |
 | `castle.click_building` ⚠ | Click a 3D castle building at normalized screen position (project-specific tool) | All |
-| `recording.start` | Start recording via InstantReplay (Android only, Play Mode) | Android |
-| `recording.stop` | Stop recording and finalize MP4 (async, poll status) | Android |
-| `recording.status` | Get current recording/export state | Android |
-| `recording.reset` | Force-reset recording system (recover from stuck state) | Android |
+| `recording.start` | Start recording via InstantReplay — OS-native MP4 (MediaCodec / VideoToolbox / Media Foundation), Play Mode only; Platform = Android/iOS/Standalone/Editor (RequirePlayMode, 仅 Play Mode 注册) | All(Play Mode) |
+| `recording.stop` | Stop recording and finalize MP4 (async, poll status) | All(Play Mode) |
+| `recording.status` | Get current recording/export state | All(Play Mode) |
+| `recording.reset` | Force-reset recording system (recover from stuck state) | All(Play Mode) |
 | `shader.hot_replace` | Runtime hot-swap a Shader from an AB (WebClient download), global or per-path with instance materials | PlayMode |
 | `shader.hot_replace_status` | Poll shader.hot_replace progress | PlayMode |
 | `asset.build_bundle` | Build an AssetBundle from project assets (Editor only, uses BuildPipeline) | Editor |
@@ -488,7 +517,13 @@ When `RequirePlayMode = true`, the tool is only registered when the Unity applic
 
 - Editor bridge (88 tools) 先连接 → Android bridge (35 tools) 后连接 → Android 覆盖重叠工具
 - 两个 bridge 都有 `scene.set_transform` → 默认调用路由到 **Android**（后注册者）
-- 录屏工具 (`recording.*`) 只在 Android bridge 注册（`Platform = Android | iOS | Standalone`）
+- 录屏工具 (`recording.*`) 注册平台为 `Android | iOS | Standalone | Editor` 且 `RequirePlayMode = true`
+  （仅 Play Mode 注册）——InstantReplay 包本身支持
+  **Android/iOS/macOS/Windows/Linux(需 ffmpeg)/Web(需 WebCodecs)**，Windows/macOS 走 OS 原生编码
+  （Media Foundation / Video Toolbox），无需外部工具；`RecordingTools.BuildOutputPath` 也含 `UNITY_EDITOR` 分支
+  （Editor 输出到项目 `VideoRecord/`）。Editor 注册是 2026-08 起的默认（曾为路由决策排除，避免 Editor bridge
+  与 Android bridge 抢 recording.* 路由，已实测 Windows Editor 录制通过），multi-bridge 下仍遵循
+  last-registration-wins + `bridge.call` 显式指定
 - 验证路由目标: `scene.get_hierarchy` 返回 flat array `[...]` = Android; 返回 `{"value":[...],"Count":N}` = Editor
 - BridgeId 是每次连接生成的 GUID（BridgeClient.cs），非持久；`bridge.list` 显示的 clientPort
   是随机客户端端口（每次连接都变），**不要用 ip+port 作稳定标识**——精确调用一律用 bridgeId
@@ -533,9 +568,11 @@ When `RequirePlayMode = true`, the tool is only registered when the Unity applic
 
 **影响**: 无害。MP4 视频轨道完整，播放正常，只是没有音频。
 
-### 2. `BuildJsonObject` 字符串值必须预引号
+### 2. `BuildJsonObject` 字符串值必须预引号 + 控制字符转义
 
 `JsonHelper.BuildJsonObject(("key", "value"))` 生成 `"key":value`（裸词，无效 JSON）。字符串值必须通过 `JsonHelper.EscapeString("value")` 包装: `("key", JsonHelper.EscapeString("value"))` → `"key":"value"`。数值和 bool 不需要包装。
+
+**同类陷阱 —— 控制字符未转义**：`EscapeString` 原先只处理 `" \` `\n` `\r` `\t`，漏了 JSON 规范要求转义的 U+0000–U+001F 控制字符（及 `\b` `\f`）。工具返回含控制字符的字符串（如 `Vector3.ToString()` 的 `(0, 0, 0)`、二进制数据、带格式符的文本）会产出无效 JSON → 服务器日志 `Invalid JSON from bridge` → 客户端表现 30s 超时（像 handler 挂起，实际是响应被丢弃）。`EscapeString` 已补全 `\b` `\f` 及 `\uXXXX` 兜底；非字符串值（float/int 的 `ToString("G")`）不受影响。诊断方法：server.log 搜 `Invalid JSON`，用 `node -e "JSON.parse(...)"` 定位裸词位置。
 
 ### 3. `InputSystem.Update()` 在 Play Mode 阻塞
 
@@ -624,3 +661,126 @@ Unity AB 去重机制: 相同内容的 AB 只能被 `LoadFromMemory` 加载一�
 **注**: `SceneHandler.SetComponentProperty` 已含 il2cpp 防御性枚举回退分支（`GetProperties()` + 
 `OrdinalIgnoreCase` 匹配 + `CanWrite` + 非索引器），用于"属性存在且可写但 `GetProperty(name)` 按名查找
 失败"的反射差异场景；setter 被裁剪（`CanWrite=false`）的场景该分支同样无法命中，需工程侧保留 setter。
+
+## Particle 特效创作 (particle.*)
+
+使用模型：**Editor 创作（资产）+ Runtime 播放**。AI 在 Editor 里创建/编辑特效并保存 prefab，
+运行时只做播放控制；一般不在 runtime 创建特效。
+
+### 工具分层
+
+- **创作/预览**（全平台，Edit Mode 可撤销）: `particle.create` / `particle.set` / `particle.simulate` / `particle.get_systems` / `particle.get_state`
+- **运行时播放**（仅 Play Mode 注册）: `particle.play` / `particle.pause` / `particle.stop` / `particle.clear` / `particle.emit`
+- **材质**: `particle.create` 的 `material` 参数（内置名 `Default-Particle`/`Sprites-Default`/`Default-Material` 或 `Assets/...` 路径）或
+  `particle.set` 的 `renderer.material` —— 创建后必须赋材质粒子才可见（URP 下默认材质可能不渲染）
+- **shader 参数**: `particle.create`/`particle.set` 新增 `shader` 参数（shader 名 `Shader.Find` 或 `Assets/...` 路径），
+  创建材质时指定 shader；**缺省 = `Universal Render Pipeline/Particles/Simple Lit`**（非 URP 回退 Legacy Particles Alpha Blended）
+- **换材质 shader**: `particle.set` renderer 模块新增 `shader` 属性（如 `{"module":"renderer","property":"shader","value":"Universal Render Pipeline/Particles/Unlit"}`）——
+  只改材质 shader 字段不动引用；Editor 下材质是资产时 SetDirty + SaveAssets **持久化到磁盘资产**（runtime 材质实例直接改）
+- **材质资产化（Editor 创作路径,重要）**: 创作阶段（Editor 非 Play）**绝不使用材质实例**——
+  - `Assets/...` 路径 → 直接加载该资产引用
+  - 内置名 → 在特效资产同目录创建/复用 `<对象名>_<材质名>.mat` **磁盘资产**并写入磁盘，特效引用此资产
+    （同一路径已存在则复用，不重复创建）
+  - 目录解析优先级: ① `materialDir` 显式参数（`particle.create`/`particle.set` 新增）→ ② 对象是 prefab 实例时其
+    源 prefab 所在目录（配合 `scene.instantiate_prefab` 用 `PrefabUtility.InstantiatePrefab` 保留关联）→ ③ 兜底 `Assets/`
+  - 创建/修改特效 prefab 或 GameObject 时都用资产引用，保存的 prefab 持有材质资产引用（跨目录引用合法）
+  - **唯独 runtime 用材质实例**: Player 或 Editor Play Mode（播放态特效本来就是临时的）→ URP Simple Lit shader
+    创建实例或内置资源
+  - 内置名在 URP 工程下优先用 `Universal Render Pipeline/Particles/Simple Lit` shader（Shader.Find），非 URP 回退内置资源
+- 材质颜色/贴图: 用 `scene.set_material`（ParticleSystemRenderer 是 Renderer）
+- 保存: `scene.save_prefab`（assetPath 参数）
+
+### 关键实现约束
+
+- **typed 代码路径，零反射**: 模块 struct 是值类型句柄（内部持 ParticleSystem 引用，setter 立即生效无需写回）；
+  反射对嵌套模块 struct 结构性不可用（get-only 访问器 + ToString 无数据），且 Android il2cpp 会裁剪模块属性
+  （同 Known Issue #11），typed 引用天然免疫。改模块属性必须先存局部变量（CS1612: 不能 `ps.emission.rateOverTime = x`）
+- **BuildJsonObject 裸词陷阱（本工具集踩过）**: 枚举 `ToString()`（simulationSpace/renderMode/scalingMode/
+  stopAction/shapeType）与颜色 hex 都必须 `JsonHelper.EscapeString()` 包装，否则服务器解析响应失败 → 调用超时
+- **`particle.set` 值语法**:
+  - MinMaxCurve 属性: 单数 = 常量；`[min,max]` = 双常量随机；`[[t,v],...]` = 动画曲线（如 `[[0,1],[1,0]]` 随时间缩小）
+  - 颜色属性: 单色（`#RRGGBB`/`[r,g,b,a]`）；`[c1,c2]` = 双色渐变（colorOverLifetime 下是**时间渐变**，startColor 下是随机）；
+    `[[t,c],...]` = 完整渐变 keys（如 `[[0,"#FF7F00"],[1,"#00000000"]]` 橙→透明渐隐）
+  - `emission.burst`: `[count, time]` 单 burst；`[[c,t],...]` 多 burst（替换现有）
+  - `main.startSize3D` 开启时 `startSize` 只影响 X（用 startSizeX/Y/Z）
+
+### 特效配方（描述词 → 完整可执行序列，AI 生成特效的"手艺"）
+
+> 用法：用户说"做个火焰特效" → 按下方序列执行（`<id>` 用 `particle.create` 返回的 instanceId 替换）。
+> 每个配方 = 1 次 `particle.create`（含材质）+ 若干 `particle.set`。Edit 预览用 `particle.simulate`，
+> 效果确认后 `scene.save_prefab` 存资产。
+
+**火焰（Fire）** — 锥形喷发 + 橙→透明渐隐 + 微扰
+```
+particle.create {"name":"FX_Fire","material":"Default-Particle","shapeType":"Cone","rateOverTime":45,"startSpeed":4,"startLifetime":1.2,"startSize":0.5,"startColor":"#FF7F00","loop":true,"playOnAwake":true}
+particle.set {"instanceId":"<id>","module":"colorOverLifetime","property":"enabled","value":true}
+particle.set {"instanceId":"<id>","module":"colorOverLifetime","property":"color","value":["#FF7F00","#00000000"]}
+particle.set {"instanceId":"<id>","module":"noise","property":"enabled","value":true}
+particle.set {"instanceId":"<id>","module":"noise","property":"strength","value":0.2}
+```
+
+**爆炸（Explosion）** — 一次性爆发 + 亮黄白 + 拖尾 + 渐小
+```
+particle.create {"name":"FX_Explosion","material":"Default-Particle","shapeType":"Sphere","startSpeed":12,"startLifetime":0.7,"startSize":0.45,"startColor":"#FFF4B8","loop":false,"playOnAwake":true}
+particle.set {"instanceId":"<id>","module":"emission","property":"burst","value":[60,0]}
+particle.set {"instanceId":"<id>","module":"sizeOverLifetime","property":"enabled","value":true}
+particle.set {"instanceId":"<id>","module":"sizeOverLifetime","property":"size","value":[[0,1],[1,0.3]]}
+particle.set {"instanceId":"<id>","module":"trails","property":"enabled","value":true}
+particle.set {"instanceId":"<id>","module":"trails","property":"lifetime","value":0.3}
+```
+
+**火花/喷溅（Sparks）** — 小锥形高速度 + 重力下落 + 黄色
+```
+particle.create {"name":"FX_Sparks","material":"Default-Particle","shapeType":"Cone","rateOverTime":80,"startSpeed":9,"startLifetime":0.5,"startSize":0.1,"startColor":"#FFD700","loop":true,"playOnAwake":true}
+particle.set {"instanceId":"<id>","module":"main","property":"gravityModifier","value":1.5}
+particle.set {"instanceId":"<id>","module":"colorOverLifetime","property":"enabled","value":true}
+particle.set {"instanceId":"<id>","module":"colorOverLifetime","property":"color","value":["#FFD700","#FF4500"]}
+```
+
+**烟雾（Smoke）** — 大粒子低速 + 灰→透明 + 强噪声 + 上升
+```
+particle.create {"name":"FX_Smoke","material":"Default-Particle","shapeType":"Sphere","rateOverTime":20,"startSpeed":0.8,"startLifetime":3,"startSize":2,"startColor":"#808080","loop":true,"playOnAwake":true}
+particle.set {"instanceId":"<id>","module":"main","property":"gravityModifier","value":-0.3}
+particle.set {"instanceId":"<id>","module":"colorOverLifetime","property":"enabled","value":true}
+particle.set {"instanceId":"<id>","module":"colorOverLifetime","property":"color","value":["#808080","#00000000"]}
+particle.set {"instanceId":"<id>","module":"noise","property":"enabled","value":true}
+particle.set {"instanceId":"<id>","module":"noise","property":"strength","value":0.5}
+```
+
+**魔法/能量（Magic）** — 蓝紫渐变 + 脉冲爆发 + 拖尾
+```
+particle.create {"name":"FX_Magic","material":"Default-Particle","shapeType":"Sphere","rateOverTime":30,"startSpeed":3,"startLifetime":1.2,"startSize":0.5,"startColor":"#7B68EE","loop":true,"playOnAwake":true}
+particle.set {"instanceId":"<id>","module":"emission","property":"burst","value":[[20,0],[20,0.5],[20,1]]}
+particle.set {"instanceId":"<id>","module":"colorOverLifetime","property":"enabled","value":true}
+particle.set {"instanceId":"<id>","module":"colorOverLifetime","property":"color","value":[[0,"#7B68EE"],[0.7,"#00CED1"],[1,"#00000000"]]}
+particle.set {"instanceId":"<id>","module":"trails","property":"enabled","value":true}
+```
+
+**雨/雪（Rain/Snow）** — Box 大范围 + 高密度 + 下落
+```
+particle.create {"name":"FX_Rain","material":"Default-Particle","shapeType":"Box","rateOverTime":300,"startSpeed":12,"startLifetime":2,"startSize":0.05,"startColor":"#B0C4DE","loop":true,"playOnAwake":true}
+particle.set {"instanceId":"<id>","module":"shape","property":"boxThickness","value":[20,0.1,20]}
+particle.set {"instanceId":"<id>","module":"main","property":"gravityModifier","value":2}
+```
+（雪: startSpeed 1.5、startSize 0.3、gravityModifier 0.2、rateOverTime 150、颜色 #FFFFFF）
+
+**光点/星星（Sparkle）** — 小粒子高密度 + 白金色 + 短命
+```
+particle.create {"name":"FX_Sparkle","material":"Default-Particle","shapeType":"Sphere","rateOverTime":80,"startSpeed":0.5,"startLifetime":1.5,"startSize":0.05,"startColor":"#FFFFFF","loop":true,"playOnAwake":true}
+particle.set {"instanceId":"<id>","module":"colorOverLifetime","property":"enabled","value":true}
+particle.set {"instanceId":"<id>","module":"colorOverLifetime","property":"color","value":["#FFFFFF","#FFD700"]}
+```
+
+**传送门/漩涡（Portal）** — Donut 环 + 旋转 + 紫青渐变
+```
+particle.create {"name":"FX_Portal","material":"Default-Particle","shapeType":"Donut","rateOverTime":60,"startSpeed":1,"startLifetime":2,"startSize":0.4,"startColor":"#8A2BE2","loop":true,"playOnAwake":true}
+particle.set {"instanceId":"<id>","module":"rotationOverLifetime","property":"enabled","value":true}
+particle.set {"instanceId":"<id>","module":"rotationOverLifetime","property":"z","value":[[0,0],[1,360]]}
+particle.set {"instanceId":"<id>","module":"colorOverLifetime","property":"enabled","value":true}
+particle.set {"instanceId":"<id>","module":"colorOverLifetime","property":"color","value":[[0,"#8A2BE2"],[1,"#00FFFF"]]}
+particle.set {"instanceId":"<id>","module":"noise","property":"enabled","value":true}
+particle.set {"instanceId":"<id>","module":"noise","property":"strength","value":0.3}
+```
+
+**验证闭环**: `particle.create` → `particle.set`（Edit 预览 `particle.simulate`）→ 进 Play 实测 →
+`camera.screenshot` 看效果 → 迭代 → `scene.save_prefab`。

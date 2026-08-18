@@ -188,7 +188,7 @@ Bridge 生命周期独立于窗口：关闭窗口后 bridge 继续运行，进�
 
 解析优先级：`instanceId` > `path`。两个都传时先试 instanceId，找不到再 fallback 路径。
 
-## 可用工具（共 117 个）
+## 可用工具（共 127 个）
 
 ### 场景工具（SceneHandler，18 All + 10 Editor = 28 工具）
 
@@ -246,10 +246,18 @@ Bridge 生命周期独立于窗口：关闭窗口后 bridge 继续运行，进�
 
 | 工具 | 平台 | 参数 | 说明 |
 |------|------|------|------|
-| `recording.start` | Android/iOS/Standalone | `width`(1280), `height`(720), `fps`(30), `enableAudio`(false), `quality`(50,1-100) | 开始通过 CyberAgent InstantReplay 录屏（OS 原生编码）。仅在 Play Mode 下可用。返回 success、outputPath、width、height、fps |
-| `recording.stop` | Android/iOS/Standalone | — | 停止录制并开始 MP4 编码。立即返回 `status:"encoding"`。轮询 recording.status 等待完成 |
-| `recording.status` | Android/iOS/Standalone | — | 查询录制/编码状态。状态流转：`idle` → `recording` → `encoding` → `completed`/`error`。完成后返回 filePath |
-| `recording.reset` | Android/iOS/Standalone | — | 强制重置录制系统。编码超时或卡死时用于恢复。清理所有会话状态 |
+| `recording.start` | All(Play Mode) | `width`(1280), `height`(720), `fps`(30), `enableAudio`(false), `quality`(50,1-100) | 开始通过 CyberAgent InstantReplay 录屏（OS 原生编码）。仅在 Play Mode 下可用。返回 success、outputPath、width、height、fps |
+| `recording.stop` | All(Play Mode) | — | 停止录制并开始 MP4 编码。立即返回 `status:"encoding"`。轮询 recording.status 等待完成 |
+| `recording.status` | All(Play Mode) | — | 查询录制/编码状态。状态流转：`idle` → `recording` → `encoding` → `completed`/`error`。完成后返回 filePath |
+| `recording.reset` | All(Play Mode) | — | 强制重置录制系统。编码超时或卡死时用于恢复。清理所有会话状态 |
+
+> **平台支持**: `recording.*` 基于 CyberAgent InstantReplay，该包官方支持 **Android / iOS / macOS / Windows /
+> Linux（需 ffmpeg）/ Web（需 WebCodecs）**，全部走 OS 原生编码（MediaCodec / VideoToolbox / Media Foundation），
+> 无需外部工具。桥注册平台为 `Android | iOS | Standalone | Editor` 且 `RequirePlayMode = true`（仅 Play Mode 注册）。
+> Editor（Windows/macOS）侧录制——例如 AI 迭代粒子特效时的反馈回路——**已默认启用**（2026-08 起，Windows Editor
+> 录制已实测通过）；multi-bridge 下如 Editor 与 Android 同时在线，遵循 last-registration-wins，需要确定性目标时用
+> `bridge.call` 显式指定。Editor 下输出到项目 `VideoRecord/`（与 camera.screenshot 同根目录），设备构建输出到
+> `temporaryCachePath/VideoRecord/`。
 
 录制流程：
 
@@ -438,13 +446,32 @@ SimpleMCPBridge 侧已配好：asmdef `versionDefines`（`com.tasharen.ngui` →
 
 | 工具 | 参数 | 说明 |
 |------|------|------|
-| `camera.screenshot` | `savePath`(必填), `cameraName`(默认Main Camera), `width`, `height` | 截取指定相机画面并保存为 PNG。savePath 是相对路径（相对 `VideoRecord/` 根目录）或绝对路径。路径根目录：Editor → `<项目根>/VideoRecord/`，Runtime → `<temporaryCachePath>/VideoRecord/`。自动创建目录。返回绝对文件路径 |
+| `camera.screenshot` | `savePath`(可选), `cameraName`(默认Main Camera), `width`, `height` | 截取指定相机画面并保存为 PNG。savePath 是相对路径（相对 `VideoRecord/` 根目录）或绝对路径；**省略时自动生成时间戳文件名**（如 `screenshot_20260814_125044.png`）。路径根目录：Editor → `<项目根>/VideoRecord/`，Runtime → `<temporaryCachePath>/VideoRecord/`。自动创建目录。返回绝对文件路径 |
 
 ### 音频工具（AudioHandler，1 工具）
 
 | 工具 | 参数 | 说明 |
 |------|------|------|
 | `audio.get_sources` | `maxResults`(默认50,上限200) | 返回所有正在播放的 AudioSource 信息。每个结果包含：clipName、volume、isPlaying、time、loop、spatialBlend、position、distanceFromListener、path、instanceId |
+
+### 粒子特效工具（ParticleHandler，10 工具）
+
+创作/预览（Edit Mode 可撤销）+ 运行时播放（Play Mode 才注册）。使用模型：**Editor 创作（资产）+ Runtime 播放**。模块属性走 typed 代码路径（零反射，规避 CS1612 与 il2cpp 裁剪），改模块属性须先存局部变量。
+
+| 工具 | 平台 | 参数 | 说明 |
+|------|------|------|------|
+| `particle.get_systems` | All | `maxResults`(默认50) | 列出场景所有 ParticleSystem + 实时状态（isPlaying/isEmitting/particleCount/time/enabledModules/renderer） |
+| `particle.get_state` | All | `instanceId`(必填) | 单个系统的详细状态 + 关键模块配置（main/emission/shape 等值） |
+| `particle.create` | All | `name`, `position`[3], `parentId`/`parentPath`, `loop`, `playOnAwake`, `startSpeed`, `startSize`, `startLifetime`, `startColor`, `rateOverTime`, `shapeType`, `gravityModifier`, `material`, `materialDir`, `shader` | 创建 GameObject + ParticleSystem（可带初始配置）。`material`：内置名（Default-Particle/Sprites-Default/Default-Material）或 `Assets/...` 路径，赋给 ParticleSystemRenderer（**创建后必须赋材质粒子才可见**）。**材质资产化**：Editor 创作路径下内置名自动落地为磁盘资产 `<对象名>_<材质名>.mat`（目录解析：`materialDir` 显式 → prefab 实例源 prefab 同目录 → 兜底 `Assets/`），特效引用资产不用实例；runtime（Player/Play Mode）才用材质实例。`shader`：创建材质时指定 shader（名或 `Assets/...` 路径），缺省 URP Particles/Simple Lit。Edit Mode 可撤销 |
+| `particle.set` | All | `instanceId`(必填), `property`(必填), `value`, `materialDir`(renderer.material 时), `shader`(renderer.material/shader 时) | 按 typed 代码路径设置模块属性：`main.*`/`emission.*`/`shape.*`/`velocityOverLifetime.*`/`forceOverLifetime.*`/`colorOverLifetime.*`/`sizeOverLifetime.*`/`rotationOverLifetime.*`/`noise.*`/`trails.*`/`textureSheetAnimation.*`/`lights.*`/`collision.*`/`renderer.*`（含 `renderer.material`，Editor 下同样材质资产化；`renderer.shader` 换材质 shader，Editor 下持久化到材质资产）。MinMaxCurve：单数=常量，`[min,max]`=随机，`[[t,v],...]`=曲线；颜色：单色，`[c1,c2]`=双色渐变（colorOverLifetime 时间渐变/startColor 随机），`[[t,c],...]`=完整渐变；`emission.burst`：`[count,time]` 或 `[[c,t],...]` |
+| `particle.simulate` | All | `instanceId`(必填), `time`(必填), `restart`(默认true), `withChildren`(默认true) | 确定性预览到 t 时刻（Edit Mode 可用，不实际播放） |
+| `particle.play` | All (Play Mode) | `instanceId`, `restart`(默认true), `withChildren` | 播放（可强制重新开始） |
+| `particle.pause` | All (Play Mode) | `instanceId`, `withChildren` | 暂停（粒子冻结） |
+| `particle.stop` | All (Play Mode) | `instanceId`, `clear`(默认true), `withChildren` | 停止（可选清空粒子） |
+| `particle.clear` | All (Play Mode) | `instanceId`, `withChildren` | 清空所有粒子但不停止系统 |
+| `particle.emit` | All (Play Mode) | `instanceId`, `count`(默认1), `position`[3], `velocity`[3], `startLifetime`, `startSize`, `startColor` | 通过 EmitParams 一次性爆发（无需播放中）。粒子参数可选，缺省用系统默认 |
+
+材质颜色/贴图用 `scene.set_material`（ParticleSystemRenderer 是 Renderer）；保存用 `scene.save_prefab`（assetPath 参数）。**素材创作流程**：先 `scene.instantiate_prefab`（PrefabUtility.InstantiatePrefab，保留 prefab 关联）把特效 prefab 放进场景 → `particle.set` 赋内置材质自动落在 prefab 同目录 → 或 `particle.create/set` 显式传 `materialDir`。配方参考：火焰/爆炸/火花/烟雾/魔法/雨雪/光点/传送门 → 见 AGENTS.md「Particle 特效创作」配方表。
 
 ### 导航工具（NavHandler，4 工具）
 
@@ -611,9 +638,24 @@ public class MyTools
 
 ## 代码质量改进
 
-### 1. Editor Eval 开关
+### 1. Editor Eval 开关与安全说明
 
-`editor.eval` 现在可通过 EditorPrefs 全局开关控制（默认 ON）。在 MCPBridge Inspector 中显示为 **"Editor Eval (global)"** 切换按钮。关闭后 `editor.eval` 调用返回错误，防止意外执行 C# 代码。
+`editor.eval` 通过 Mono.CSharp 动态编译并在内存中执行任意 C# 代码 —— 等同于完全的 Unity/机器控制（读写任意文件、删除资产、网络访问、启动进程等）。这是工具集最强的"逃生舱":当某个场景操作没有专用工具覆盖时,AI 可用 eval 即时补救。
+
+**默认 ON,以用户方便为先**。开发调试、快速原型、补救缺口工具时即时可用,不必先翻配置。若环境不可信（共享机器/公网暴露的服务器),关闭它。
+
+**双重 gate（任一关闭即不可用）**:
+- **Server 侧 `config.json` → `evalEnabled`**（默认 `true`）:`false` 时 `tools/list` 不暴露 `editor.eval` 给 agent,agent 看不到也就调不到。
+- **Bridge 侧 `EditorPrefs SimpleMCPBridge_EvalEnabled`**（默认 `true`）:执行前再检查一次;MCPBridge Inspector 显示为 **"Editor Eval (global)"** toggle,关闭后调用返回错误。
+
+**风险面**:任何能调用 `/rpc` 的 AI 都能执行任意代码。本工具**不做代码内容过滤**（任意代码无法穷举拦截,黑名单无意义）。安全靠网络层 gate —— `allowedIps` 白名单默认仅本机（`127.0.0.1`/`::1`）。云部署（`ip:0.0.0.0`）前务必扩白名单到可信 IP 段,或直接 `evalEnabled:false`。
+
+**关闭方法**（任一即可）:
+- `SimpleMcpServer/config.json` 设 `"evalEnabled": false`（重启 server,对所有 agent 隐藏）
+- Unity Editor: MCPBridge Inspector 的 eval toggle（立即生效,单机）
+- 代码:`EditorPrefs.SetBool("SimpleMCPBridge_EvalEnabled", false)`
+
+详见 AGENTS.md「editor.eval 安全说明」。
 
 ### 2. 加密格式变更
 
@@ -630,9 +672,11 @@ public class MyTools
 **根因**：InstantReplay 始终创建音频轨道，即使 `enableAudio=false`。音频轨道从未收到帧。
 **影响**：无害。MP4 视频轨道完整，播放正常。
 
-### 2. `BuildJsonObject` 字符串值必须预引号
+### 2. `BuildJsonObject` 字符串值必须预引号 + 控制字符转义
 
-`BuildJsonObject(("key", "value"))` 生成 `"key":value`（裸词）。字符串值需通过 `EscapeString("value")` 包装。
+`BuildJsonObject(("key", "value"))` 生成 `"key":value`（裸词，无效 JSON）。字符串值必须通过 `EscapeString("value")` 包装: `("key", JsonHelper.EscapeString("value"))` → `"key":"value"`。数值和 bool 不需要包装。
+
+**同类陷阱 —— 控制字符未转义**：`EscapeString` 原先只处理 `" \` `\n` `\r` `\t`，漏了 JSON 规范要求转义的 U+0000–U+001F 控制字符（及 `\b` `\f`）。工具返回含控制字符的字符串（如 `Vector3.ToString()` 的 `(0, 0, 0)`、二进制数据、带格式符的文本）会产出无效 JSON → 服务器日志 `Invalid JSON from bridge` → 客户端表现 30s 超时（像 handler 挂起,实际是响应被丢弃）。`EscapeString` 已补全 `\b` `\f` 及 `\uXXXX` 兜底；非字符串值（float/int 的 `ToString("G")`）不受影响。诊断：server.log 搜 `Invalid JSON`,用 `node -e "JSON.parse(...)"` 定位裸词位置。
 
 ### 3. 端口占用
 

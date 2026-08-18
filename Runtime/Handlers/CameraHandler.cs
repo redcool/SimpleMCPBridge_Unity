@@ -18,21 +18,24 @@ namespace SimpleMCPBridge.Runtime.Handlers
     {
         [MCPTool(MCPMethodConst.CAMERA_SCREENSHOT,
             "Capture a camera view and save as PNG. " +
-            "Params: savePath (string, required — relative path under VideoRecord/, or absolute path), " +
+            "Params: savePath (string, optional — relative path under VideoRecord/, or absolute path; " +
+            "omitted → auto-generated timestamped filename like screenshot_20260814_125044.png), " +
             "cameraName (string, optional, default 'Main Camera'), " +
             "width (int, optional, default screen width), " +
             "height (int, optional, default screen height). " +
             "Relative paths are rooted at: Editor → <Project>/VideoRecord/, Runtime → <temporaryCachePath>/VideoRecord/. " +
             "Returns the absolute file path of the saved screenshot.",
             Platform = MCPToolPlatforms.All)]
-        [MCPParam("savePath", Type = "string", Required = true, Description = "Relative path under VideoRecord/")]
+        [MCPParam("savePath", Type = "string", Description = "Relative path under VideoRecord/ (optional; auto-generated timestamped filename if omitted)")]
         [MCPParam("cameraName", Type = "string", Description = "Camera name (default 'Main Camera')")]
         [MCPParam("width", Type = "integer", Description = "Output width px (default screen width)")]
         [MCPParam("height", Type = "integer", Description = "Output height px (default screen height)")]
         public static string Screenshot(string paramsJson)
         {
             var args = ParseJsonObject(paramsJson);
-            var savePath = GetRequiredString(args, "savePath");
+            var savePath = GetString(args, "savePath");
+            if (string.IsNullOrWhiteSpace(savePath))
+                savePath = $"screenshot_{DateTime.Now:yyyyMMdd_HHmmss}.png";
             var cameraName = GetString(args, "cameraName", "Main Camera");
             var width = (int)GetOptionalInt(args, "width").GetValueOrDefault(Screen.width);
             var height = (int)GetOptionalInt(args, "height").GetValueOrDefault(Screen.height);

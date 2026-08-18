@@ -60,10 +60,24 @@ namespace SimpleMCPBridge.Runtime
                 {
                     case '"': sb.Append("\\\""); break;
                     case '\\': sb.Append("\\\\"); break;
+                    case '\b': sb.Append("\\b"); break;   // 0x08 backspace
+                    case '\f': sb.Append("\\f"); break;   // 0x0C form feed
                     case '\n': sb.Append("\\n"); break;
                     case '\r': sb.Append("\\r"); break;
                     case '\t': sb.Append("\\t"); break;
-                    default: sb.Append(c); break;
+                    default:
+                        // JSON 规范要求 U+0000–U+001F 控制字符必须转义为 \uXXXX。
+                        // 不转义会让响应含裸控制字符 → 服务器 "Invalid JSON from bridge" → 客户端超时。
+                        if (c < 0x20)
+                        {
+                            sb.Append("\\u");
+                            sb.Append(((int)c).ToString("X4", CultureInfo.InvariantCulture));
+                        }
+                        else
+                        {
+                            sb.Append(c);
+                        }
+                        break;
                 }
             }
             sb.Append('"');

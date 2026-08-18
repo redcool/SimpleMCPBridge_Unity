@@ -78,15 +78,49 @@
   - UITK 交互事件**依赖 EventSystem 桥接**(PanelEventHandler + PanelRaycaster),无桥接 → UITK 无事件(input.click_screen 射不到,uitk.click 不受影响)
   - **不加 `UITK_ON` 条件编译**: uielements 是内置模块非可选包(2022.3 必有,桌面平台官方不支持移除),条件恒真;客户 runtime 不用 UITK 时用 `tools.disable ["Uitk"]` 裁剪即可,做好分类(类别 `Uitk`)就够
   - 已同步: AGENTS.md(uGUI/NGUI/UITK 独立工具集段落)、README.md(UITK 工具块)、本文件
+- [x] 2026-08 **recording.\* 平台调查 + Editor 启用 + 实测通过** — InstantReplay 官方支持 Android/iOS/macOS/Windows/Linux(ffmpeg)/Web(WebCodecs),Windows/macOS 走 OS 原生编码(Media Foundation/VideoToolbox);桥代码本就 Editor 就绪(RecordingTools.BuildOutputPath 含 UNITY_EDITOR 分支、RecordingHandler 注释含 Media Foundation);唯一限制是 4 个工具 `Platform=Android|iOS|Standalone` 注册过滤(路由决策非能力限制)。AGENTS.md 工具表 "Android only"→"Android/iOS/Standalone",Multi-Bridge 节补 Editor 启用方法;README 录制节补平台支持矩阵。**用户拍板: 启用 Editor** — RecordingHandler 4 个工具 Platform 加 `MCPToolPlatforms.Editor` + `RequirePlayMode = true`(防 Edit Mode 注册),注释同步。**实测(Windows Editor, Play Mode)**: request_compile → 域重载后 118 工具(含 recording.* 4 个,Play Mode 才注册)→ recording.start(1280x720@30, outputPath=项目 VideoRecord/recording_*.mp4)→ 3s → stop → encoding → completed → MP4 落盘 1.5MB ✅ → exit_play_mode。文档已改为已启用状态
+- [x] 2026-08 **particle.\* 工具集实现 + 实测(10 工具, 用户拍板"Editor 创作 + Runtime 播放"模型)** —
+  - 新文件 `Runtime/Handlers/ParticleHandler.cs`([MCPToolClass], typed 代码路径零反射);MCPMethodConst.cs 加 10 常量;类别自动推导 `Particle`
+  - **分层**: 创作/预览(全平台, Edit Mode 可撤销) `particle.create`(GO+ParticleSystem+可选初始配置)/`particle.set`(模块属性,含 renderer 模块)/`particle.simulate`(Edit 预览)/`particle.get_systems`/`particle.get_state`;运行时播放(RequirePlayMode=true, 仅 Play Mode 注册) `particle.play(restart)`/`pause`/`stop(clear)`/`clear`/`emit`(EmitParams 一次性爆发)
+  - **设计依据**(调研): 模块 struct=值类型句柄(setter 立即生效无需写回,但 CS1612 须先存局部变量);反射对嵌套模块结构性不可用 + il2cpp 裁剪(同 #11) → 必须 typed 路径;Edit 创作 = 序列化资产, 材质复用 scene.set_material(ParticleSystemRenderer 是 Renderer)
+  - **踩坑(BuildJsonObject 裸词, 已修)**: BuildSystemJson 曾直接放枚举 ToString 裸词(simulationSpace/renderMode/scalingMode/stopAction/shapeType)+ 未引号颜色 hex → 服务器解析响应失败静默丢响应 → 客户端超时(表现像 handler 挂起,实际是响应非法);已全部 EscapeString 包装(CurveJson/GradientJson 内部分支同步修)
+  - **实测(Windows Editor)**: Edit Mode 注册 5 个(Play 门控正确);create AI_Fire(火焰配方)→ set 8 项(loop/rateOverTime/angle/colorOverLifetime/renderMode/startColor 等)→ get_state 回读全对;Play Mode 注册 10 个 → playOnAwake 自动播放(isEmitting=true, particleCount=72)→ emit 30 粒(72→102)→ pause 冻结(102)→ stop(clear)归零 → camera.screenshot 落盘 ✅ → simulate Edit 预览 ✅ → save_prefab 存 `Assets/Prefabs/AI_Fire.prefab` ✅
+  - 文档: AGENTS.md 工具表 +10 行(平台列 All/All(Play Mode) 分层)+ 新节「Particle 特效创作」含工具分层/关键实现约束/特效配方表(火焰/爆炸/火花/烟雾/魔法/雨雪/光点/传送门)/验证闭环;README.md 工具节加「粒子特效工具」10 工具表(计数 117→127),AGENTS.md 工具表头 117→127
+
+- [x] 2026-08 **camera.screenshot 的 savePath 改可选(用户拍板)** — `CameraHandler.cs` 原 `Required = true` + `GetRequiredString` → `GetString` 可选语义:缺省/空白自动生成 `screenshot_yyyyMMdd_HHmmss.png` 存 VideoRecord/(向后兼容,显式传值行为不变);工具描述与 MCPParam 注释同步,README savePath 必填→可选,AGENTS.md 工具表补「savePath 可选,省略自动生成时间戳文件名」
+  - 起因:调用不传 savePath 报 `Missing required parameter: 'savePath'`(AGENTS.md 描述未提必填,自然用法易踩)
+
+- [x] 2026-08 **particle.\* 增强轮(材质 + 渐变/曲线/burst + 配方细化,用户需求)** —
+  - **材质**: `particle.create` 新增 `material` 参数(内置名 `Default-Particle`/`Sprites-Default`/`Default-Material` 或 `Assets/...` 路径,Editor 走 AssetDatabase,全平台走 `Resources.GetBuiltinResource`,带 .mat 后缀容错);`particle.set` renderer 模块新增 `material` 属性(共用 `ResolveMaterial`/`ApplyMaterial`,sharedMaterial + UndoRecord);文档明确"创建后必须赋材质粒子才可见(URP 下默认材质可能不渲染)"
+  - **URP shader(用户建议,已实现+实测)**: `ResolveMaterial` 对内置名**优先用 `Shader.Find("Universal Render Pipeline/Particles/Simple Lit")` 创建材质**,非 URP 工程回退 `Resources.GetBuiltinResource`。实测:create material="Default-Particle" → shader 名 = "Universal Render Pipeline/Particles/Simple Lit" ✅
+  - **材质资产化(用户第二轮需求,已实现+实测)**: Editor 创作路径(非 Play)**绝不使用材质实例** —— `ResolveMaterial(ps, spec, materialDir)` 分支:Assets/... 路径 → AssetDatabase 加载资产;内置名 → `EnsureMaterialAsset` 在特效资产同目录创建/复用 `<对象名>_<材质名>.mat` **磁盘资产**(AssetDatabase.CreateAsset + SaveAssets + Refresh,已存在则 LoadAssetAtPath 复用),renderer 引用资产;runtime(Player/Play Mode)才 new 材质实例。目录解析优先级:① `materialDir` 显式参数(create/set 新增)→ ② `PrefabUtility.GetCorrespondingObjectFromSource`(对象是 prefab 实例时源 prefab 所在目录)→ ③ 兜底 `Assets/`
+  - **scene.instantiate_prefab 行为变更(顺带修复,实测驱动)**: 原 `Object.Instantiate` **不保留 prefab 关联** → 材质推断永远走兜底目录。改为 `PrefabUtility.InstantiatePrefab(prefab) as GameObject`(语义正确:实例关联源 prefab,实例改动传导 prefab,材质资产化依赖此推断同级目录)。AGENTS.md 工具表已注明
+  - **实测全过(Windows Editor, /rpc 活体)**: ①create material="Default-Particle" → 磁盘资产 `Assets/Test_MatAsset_Default-Particle.mat` 生成 + renderer 引用资产(AssetDatabase.Contains=True, shader=URP Simple Lit)✅;②重复 set 同材质 → 复用(资产文件 LastWriteTime 不变,不重复创建)✅;③`materialDir="Assets/Tests"` → 材质资产建在指定目录 ✅;④instantiate_prefab 实例 set 材质(无 materialDir)→ 自动落 prefab 同目录 `Assets/Tests/` ✅(PrefabUtility.InstantiatePrefab 生效);⑤测试对象/资产已清理(asset.delete 参数名是 `assetPath` 不是 `path`),AI_Fire 材质保持引用磁盘资产 `Assets/Tests/AI_Fire_Default-Particle.mat`
+  - **shader 参数 + 换 shader 工具(用户第三轮需求,已实现+实测)**: `particle.create`/`particle.set` 新增 `shader` 参数(shader 名 `Shader.Find` 或 `Assets/...` 路径,`ResolveShader` 解析,找不到抛错不静默回退)——创建材质时指定 shader,**缺省 = URP Simple Lit**(`DefaultParticleShader()` 链:URP Simple Lit → Legacy Particles Alpha Blended);`particle.set` renderer 模块新增 `shader` 属性(`SetRendererShader`:只改材质 shader 字段不动引用,Editor 下材质是资产时 SetDirty + SaveAssets **持久化到磁盘资产**,runtime 实例直接改,UndoRecord)。实测:①create material+shader=URP Particles/Unlit → 资产 shader=Unlit ✅;②create 不带 shader → 默认 SimpleLit(回归)✅;③AI_Fire `particle.set renderer.shader="Universal Render Pipeline/Particles/Unlit"` → 资产 `Assets/Tests/AI_Fire_Default-Particle.mat` shader 改为 Unlit,asset.refresh 后重读仍 Unlit(已持久化)✅;测试对象/资产已清理
+  - **渐变/曲线/burst 值语法**(配方可执行的关键): `ToCurve` 支持 `[[t,v],...]` 动画曲线(如 sizeOverLifetime.size `[[0,1],[1,0.3]]` 渐小);新增 `ToGradient` 支持 `[c1,c2]` 双色渐变(colorOverLifetime=时间渐变/startColor=随机)与 `[[t,c],...]` 完整渐变(如橙→透明渐隐);`SetEmission` 新增 `burst` 属性(`[count,time]` 单 / `[[c,t],...]` 多 burst 替换)
+  - **两个解析 bug(实测抓出并修复)**: ① `ParseJsonValue` 嵌套检查误用 `s.Contains('[')`(任何数组都含 `[`)→ 改为剥**恰好一层**外层括号后检查内层;② `NormalizeArray` 用 `Trim('[',']')` 剥括号会把**内层括号也削掉**导致字符串错乱 → 改剥一层。另外 `ToCurve` 曾用 `List<object> ?? float[]`(CS0019 编译错误)已修为 `normalized ?? (object)entry`
+  - **文档**: AGENTS.md「特效配方」从要点表升级为**8 个完整可执行序列**(火焰/爆炸/火花/烟雾/魔法/雨雪/光点/传送门,每个 = 1 次 create 含材质 + N 次 set,含具体数值),工具分层补材质行,关键实现约束补值语法 + 材质资产化(目录解析 3 级);README 粒子工具节同步(material/materialDir 参数 + 渐变/曲线/burst 语法 + 素材创作流程)
+  - 编译修了 2 轮(CS0019 + 逻辑 bug),期间 bridge 用旧 DLL 的"Property not supported"是编译失败的表现(Unity 保留旧 DLL),排查法:editor.get_console 搜 `error CS`
+
+- [x] 2026-08 **particle.get_state/set 完备性修复(用户需求: get_state 输出对不上)** — `Runtime/Handlers/ParticleHandler.cs`:
+  - **get 侧补齐 set 侧已有但 get 缺失的字段**: `main.gravitySource`、`emission.bursts`(数组)、`rotationBySpeed.separateAxes`、`lifetimeByEmitterSpeed`(curveMultiplier/curve/range)、`noise`(octaves/octaveMultiplier/octaveScale/quality, `#if` 保护 URP 存在性)、`textureSheetAnimation`(rowMode/timeMode/speedRange)、`limitVelocityOverLifetime`(limitX/Y/Z/dampen/space)、`inheritVelocity`(mode/curve)、`trigger`(inside/outside/enter/exit)、`customData`(mode0/1 + vector0/1 + color0/1)、`collision`(bounce/lifetimeLoss/minKillSpeed/maxKillSpeed/colliderForce/dampen/quality/maxCollisionShapes/voxelSize/multiply* 开关)、`subEmitters` 6 槽逐槽(birth0-1/collision0-1/death0-1, 空则只输出 enabled)
+  - **真 bug 修复**: ① `rendererPivot` 是 Vector3 `ToString("G")` 裸词 `(0, 0, 0)` → **Invalid JSON → 服务器超时**(旧越界异常掩盖,修好越界后暴露,node JSON.parse 定位)→ `EscapeString` 包装;② `GetSubEmitterSystem(i)` 空槽抛 IndexOutOfRangeException → 用 `subEmittersCount` 限制遍历;③ 编译错误:`EmissionBurstsJson` 无 `bursts` 属性 → `burstCount`+`GetBursts()`(空数组返回 `[]`);`subEmitterCount` → 正确名 **`subEmittersCount`(带 s)**;`AddSubEmitter` 无 2 参重载 → 3 参 `(sub, type, InheritNothing)`;④ set 侧槽位映射:Unity SubEmittersModule 只有 **6 槽**(非 9),`SetSubEmitterSlot` 按 index<subEmittersCount 覆盖 / 否则 `AddSubEmitter` 创建(首个子发射器可建)
+  - **实测(Windows Editor, /rpc 活体)**: CleanBuildCache 编译零错(DLL 重建)→ get_state 完整 JSON 有效(node JSON.parse 通过)→ `collision.bounce=[0.2,0.8]` 双常量 set/get 对称 ✅ → `subEmitters.birth0="FX_TestSub"` set/get 对称 + 清理后消失 ✅ → `noise.quality`/`rowMode`/`curveMultiplier`/`limitX` set/get 全对称 ✅ → 测试状态已恢复(bounce=1、子发射器移除)
 
 ## 进行中 (Active)
 
-- (无重大进行项——本轮修复全部完成并验证，文档已补写;Android 活体测试轮也全部完成并验证)
+- ✅ 2026-08 particle.get_state/set 完备性修复轮已完成并实测(见 Completed)——待用户提交(改动仅 `Runtime/Handlers/ParticleHandler.cs` 单文件)
+
+- (无重大进行项——particle.* 工具集已完成并实测,文档已补写)
 
 ## 下一步 (Next Move)
 
 - **待办: 两个仓库提交由用户执行**(桥 `H:\ai_works\SimpleMCPBridge` + 服务端 `H:\ai_works\SimpleMcpServer` 均故意丢脏树)
-  - 本轮(Android 测试轮)桥侧未提交改动:`Runtime/UrpDebugGuard.cs`(新文件,URP 崩溃防护)、`Runtime/Handlers/SceneHandler.cs`(SetComponentProperty il2cpp 枚举回退分支)、`SimpleMCPBridge.asmdef`(Core.Runtime 软引用 + versionDefine)、`AGENTS.md`(Known Issue #10/#11 + BridgeId 变化说明)
+  - 本轮(particle 轮)桥侧未提交改动:`Runtime/Handlers/ParticleHandler.cs`(新文件,10 工具)、`Runtime/MCPMethodConst.cs`(10 常量)、`AGENTS.md`(工具表 +10 + Particle 特效创作节 + 计数 127)、`README.md`(粒子特效工具节 + 计数 127)、`Docs/SESSION_MEMORY.md`(本文件)
+  - camera.screenshot 轮未提交改动:`Runtime/Handlers/CameraHandler.cs`(savePath 可选 + 自动时间戳文件名)、`AGENTS.md`(工具表 savePath 说明)、`README.md`(savePath 必填→可选)
+  - particle 增强轮未提交改动:`Runtime/Handlers/ParticleHandler.cs`(material 参数 + renderer.material + ToCurve/ToGradient/NormalizeArray + emission.burst)、`Runtime/Handlers/HandlerUtils.cs`(ParseJsonValue 嵌套数组不再拍平)、`AGENTS.md`(8 配方完整序列 + 值语法 + 工具表)、`README.md`(粒子工具节)
+  - 上轮(Android 测试轮)未提交改动:`Runtime/UrpDebugGuard.cs`(新文件,URP 崩溃防护)、`Runtime/Handlers/SceneHandler.cs`(SetComponentProperty il2cpp 枚举回退分支)、`SimpleMCPBridge.asmdef`(Core.Runtime 软引用 + versionDefine)、`AGENTS.md`(Known Issue #10/#11 + BridgeId 变化说明)
+  - 本轮(particle 完备性轮)未提交改动:`Runtime/Handlers/ParticleHandler.cs`(get 侧字段补齐 + rendererPivot 转义 + subEmitters 6 槽 + bursts 修复 + set 槽位映射)——单文件
   - 测试工程 `TestAIMcpPrj` PlayerMove.cs 验证代码已还原(无残留改动)
 - **提醒: 轮换 git 历史残留的 LLM API key**——真实 key 曾提交到 SimpleMcpServer git 历史(如 98d601e),config.json 已被 .gitignore 排除;改用环境变量 `LLM_API_KEY` 覆盖(index.ts 已支持)后轮换
 - **可选优化**:
@@ -117,7 +151,7 @@
 
 - **Bridge ID 每次重连都会变**:ID 每连接新生成(非持久),重连后旧 ID 立即失效报 `Bridge '<id>' not found`。调用前先 `GET /health` 或 `bridge.list` 取最新 ID,勿缓存/勿手写(本会话因过期 ID 多次踩坑)
 - **il2cpp setter 裁剪使 set_component_property 报 not found(非桥 bug)**:Android 上对工程未引用的属性(如 Rigidbody.mass/drag)报 not found,但 get 侧能读到值;Editor 同调用成功。诊断:对比两端 propertyCount(Android 9 vs Editor 51)。解决:工程侧引用一次 setter(`rb.mass = rb.mass`)/降低 stripping/link.xml 保留
-- **call_component_method 重载参数必须给全**:`args` 命名映射 + 完整重载参数(如 AddForce 需 `force`+`mode`,缺 mode 报 "Missing required argument")。box_cast/overlap_box 参数名是 `halfExtents`(不是 size);camera.screenshot 需 `savePath`;game.set_time_scale 用 `value`
+- **call_component_method 重载参数必须给全**:`args` 命名映射 + 完整重载参数(如 AddForce 需 `force`+`mode`,缺 mode 报 "Missing required argument")。box_cast/overlap_box 参数名是 `halfExtents`(不是 size);game.set_time_scale 用 `value`(**camera.screenshot 的 savePath 已改可选**,2026-08)
 
 - NGUI 符号定义 ≠ 类型可解析:versionDefines 加 `NGUI_ON` 只是定义符号,还必须 asmdef `references` 含 `"NGUI"` 才能解析类型,否则 CS0246
 - 长连接隐患:Unity 重开 → opencode MCP 断连 → 必须重开 opencode → 会话记忆丢失(已用本文件规避)
@@ -128,12 +162,23 @@
 - **scene.load_scene 首次报 "not found in project"**:ResolveScenePath 曾把完整路径当名字塞进 FindAssets 名称过滤器 → 路径入参应先 `LoadAssetAtPath<SceneAsset>` 直接校验,FindAssets 只用文件名
 - **服务端 HTTP 403 排查**:先看 config.json 的 `allowedIps` 是否含来源 IP(默认仅 127.0.0.1/::1);测试调用从局域网 IP 打 `/rpc` 会 403 属预期,走 127.0.0.1 或加白名单
 - **DrainQueue 需帧预算**:桥队列在慢工具(树截断/大响应)时可能积压,Disconnect 必须全清(否则卡死),常规 Drain 按帧预算(12 条)防一帧卡爆
+- **eval(Mono.CSharp)对部分代码块静默失败**:含 `try-catch`、`for` 循环、或「模块属性 = new MinMaxCurve(...)」类赋值的代码块 → eval 返回 `"statement executed"` 但**后续代码不执行**(如 File.WriteAllText 不落盘),无异常可见。可靠形式:无 try-catch、无 for、纯语句块 + 结尾 `"done"` 字符串表达式;写文件诊断用单个表达式。遇到怪癖时改用 particle.set 等工具路径(工具内执行正常)绕过
+- **编译后 bridge 偶发不自动重连**:CleanBuildCache 域重载完成后 MCPBridge 组件**未 Awake**(Editor.log 无 "MCP Server" 日志)→ InstanceUpdate 自动重连(依赖 OnEnable 注册)不启动 → health 一直 bridge=False。恢复:**激活 Unity 主窗口**(ShowWindow+SetForegroundWindow)多数情况下立即恢复重连;Ctrl+R PostMessage 与 touch 文件监视无效(主线程僵死时不响应)。等 45-60s 也可能自动连上(18:37 轮就是)
+- **服务器日志 "Invalid JSON from bridge" = 桥侧裸词**:客户端表现是 30s 超时(像 handler 挂起),实际 bridge 已返回但响应含裸词(如 Vector3 `ToString` 的 `(0, 0, 0)`)导致服务器 JSON 解析失败丢弃。排查:Server.log 搜 `Invalid JSON`(服务器会打印截断的原文),node JSON.parse 定位裸词位置;与 Known Issue #2(BuildJsonObject 字符串预引号)同族
 
 ## 相关文件索引
 
 | 路径 | 说明 |
 |------|------|
-| `H:\ai_works\SimpleMcpServer\src\index.ts` | WS 服务器(679)、/rpc(1250)、/sse+/mcp(979-1005)、来源标注(268-294)、last-wins(754-765)、failover(879-917)、allowedIps gate(118-182)、template 自动复制(150-161)、maxPayload 4MB(713)、pong 跟踪(719-736) |
+| `H:\ai_works\SimpleMcpServer\src\index.ts` | 薄引导入口(shebang + 架构注释 + main().catch) |
+| `H:\ai_works\SimpleMcpServer\src\server.ts` | main() 组合根:WS 服务器、/rpc、/sse+/mcp、last-wins、failover、allowedIps gate、maxPayload 4MB、pong 跟踪、retryQueue/retryTimer(2026-08 拆分自单文件 index.ts) |
+| `H:\ai_works\SimpleMcpServer\src\logger.ts` | log()(stderr + server.log) |
+| `H:\ai_works\SimpleMcpServer\src\config.ts` | Config 加载(allowedIps gate、template 自动复制、reloadConfig 预热缓存) |
+| `H:\ai_works\SimpleMcpServer\src\crypto.ts` | AES-256-CBC 加解密(#ENC# 格式) |
+| `H:\ai_works\SimpleMcpServer\src\llm.ts` | callLLM(OpenAI-compatible + Ollama)、sanitizeLLMError |
+| `H:\ai_works\SimpleMcpServer\src\bridgeState.ts` | 多 Bridge 状态(bridges/toolToBridge/pending/pendingAI/isUnityCompiling/playModeState)+ callBridge/callBridgeById/rejectPendingForBridge + setter |
+| `H:\ai_works\SimpleMcpServer\src\tools.ts` | SERVER_TOOLS + getMergedTools(来源标注 `[bridge: ip:port (id)]`) |
+| `H:\ai_works\SimpleMcpServer\src\ab.ts` | AB 传输(handleABRequest + bestHostForBridge/getLanIp/sameSubnet) |
 | `H:\ai_works\SimpleMcpServer\config.json.template` | 完整配置模板(allowedIps 默认本机 + llm 段 + evalEnabled) |
 | `Runtime/BridgeClient.cs` | NetWebSocketClient(135)、BridgeId=GUID(43)、DrainQueue 帧预算(214-229) |
 | `Runtime/UrpDebugGuard.cs` | (新,2026-08)URP DebugUpdater 崩溃防护 —— BeforeSceneLoad 关 enableRuntimeUI,Known Issue #10 |
@@ -143,6 +188,7 @@
 | `Runtime/Handlers/AssetHandler.cs` | asset CRUD + build_bundle(Editor,#if UNITY_EDITOR) |
 | `Runtime/Handlers/UIToolkitHandler.cs` | uitk.create_element(320)/remove_element(400) |
 | `Runtime/Handlers/GameHandler.cs` | TickWatch(每10帧缓存)、get_delta 读缓存清空、_watchPropertyCache |
+| `Runtime/Handlers/ParticleHandler.cs` | (新,2026-08)particle.* 10 工具 —— typed 模块路径零反射、Edit 创作可撤销、Play 门控、EmitParams 爆发;2026-08 get_state/set 完备性轮:get 侧字段补齐 + subEmitters 6 槽(birth0-1/collision0-1/death0-1) + bursts(burstCount+GetBursts) + rendererPivot 转义 + set 槽位映射(覆盖/AddSubEmitter) |
 | `Runtime/MCPBridge.cs` | Update/InstanceUpdate 挂接 TickWatch |
 | `SimpleMCPBridge.asmdef` | references 含 NGUI+Unity.TextMeshPro;versionDefines NGUI_ON+TEXT_MESH_PRO_ON |
 | `C:\Users\Admin\.config\opencode\opencode.json` | unityMCP=8082/mcp(**另一个 MCP,勿动**) |

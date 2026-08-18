@@ -1343,7 +1343,9 @@ namespace SimpleMCPBridge.Runtime.Handlers
             if (prefab == null)
                 return ErrorJson($"Prefab not found at path: {assetPath}");
 
-            var go = Object.Instantiate(prefab);
+            var go = UnityEditor.PrefabUtility.InstantiatePrefab(prefab) as GameObject;
+            if (go == null)
+                return ErrorJson("Failed to instantiate prefab (PrefabUtility.InstantiatePrefab returned null)");
             SceneObjectTools.UndoRegisterCreated(go, $"Instantiate {prefab.name}");
 
             if (posArr != null && posArr.Length >= 3)

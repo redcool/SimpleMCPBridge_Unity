@@ -258,6 +258,28 @@ namespace SimpleMCPBridge.Runtime
         /// <summary>获取场景中所有正在播放的 AudioSource。</summary>
         public const string AUDIO_GET_SOURCES = "audio.get_sources";
 
+        // ── 粒子工具 ──
+        /// <summary>列出场景中所有 ParticleSystem 及实时状态。</summary>
+        public const string PARTICLE_GET_SYSTEMS = "particle.get_systems";
+        /// <summary>获取单个 ParticleSystem 的详细状态与配置。</summary>
+        public const string PARTICLE_GET_STATE = "particle.get_state";
+        /// <summary>创建 GameObject + ParticleSystem（Edit Mode 可撤销）。</summary>
+        public const string PARTICLE_CREATE = "particle.create";
+        /// <summary>播放粒子系统（可选 restart）。</summary>
+        public const string PARTICLE_PLAY = "particle.play";
+        /// <summary>暂停粒子系统。</summary>
+        public const string PARTICLE_PAUSE = "particle.pause";
+        /// <summary>停止粒子系统（可选清空粒子）。</summary>
+        public const string PARTICLE_STOP = "particle.stop";
+        /// <summary>清空粒子系统所有粒子。</summary>
+        public const string PARTICLE_CLEAR = "particle.clear";
+        /// <summary>一次性发射粒子（EmitParams，无需播放）。</summary>
+        public const string PARTICLE_EMIT = "particle.emit";
+        /// <summary>模拟粒子系统到指定时间（确定性预览）。</summary>
+        public const string PARTICLE_SIMULATE = "particle.simulate";
+        /// <summary>设置粒子系统模块属性（typed 代码路径，非反射）。</summary>
+        public const string PARTICLE_SET = "particle.set";
+
         // ── UI 操作工具 ──
         /// <summary>设置输入框文本。</summary>
         public const string UI_SET_INPUT_FIELD_TEXT = "ui.set_input_field_text";

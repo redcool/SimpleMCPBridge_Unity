@@ -92,10 +92,20 @@ namespace SimpleMCPBridge.Runtime.Handlers
                 if (s.Contains('{') || s.Contains('"'))
                     return s;
 
-                var inner = s.Trim('[', ']').Trim();
-                if (string.IsNullOrEmpty(inner)) return new float[0];
+                // Nested arrays (e.g. [[0,1],[1,0]] curve/gradient keys) → return raw JSON
+                // string so callers (particle curve/gradient/burst) can preserve structure.
+                // Check the inner content (after stripping exactly ONE outer bracket pair,
+                // since Trim('[',']') would also strip inner brackets and corrupt the string).
+                var stripped = s.Trim();
+                if (stripped.Length >= 2 && stripped[0] == '[' && stripped[stripped.Length - 1] == ']')
+                    stripped = stripped.Substring(1, stripped.Length - 2);
+                if (stripped.Contains('['))
+                    return s;
 
-                var items = inner.Split(',');
+                stripped = stripped.Trim();
+                if (string.IsNullOrEmpty(stripped)) return new float[0];
+
+                var items = stripped.Split(',');
                 var floats = new List<float>();
                 foreach (var item in items)
                 {
