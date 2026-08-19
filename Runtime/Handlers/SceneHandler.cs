@@ -970,7 +970,7 @@ namespace SimpleMCPBridge.Runtime.Handlers
             return JsonHelper.BuildJsonObject(("success", "true"));
         }
 
-        [MCPTool(MCPMethodConst.OPEN_WINDOW, "Open a Unity Editor window by menu path — use the exact path as shown in Unity's menu bar (e.g. 'Tools/SimpleMCPBridge', 'Window/General/Console'). Returns an error if the menu item is not found.")]
+        [MCPTool(MCPMethodConst.OPEN_WINDOW, "Open a Unity Editor window by menu path — use the exact path as shown in Unity's menu bar (e.g. 'Window/General/Console'). Returns an error if the menu item is not found.")]
         [MCPParam("menuPath", Type = "string", Required = true, Description = "Exact Unity menu path, e.g. 'Window/General/Console'")]
         public static string OpenWindow(string paramsJson)
         {
