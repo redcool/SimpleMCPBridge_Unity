@@ -1,4 +1,4 @@
-﻿using SimpleMCPBridge.Runtime;
+using SimpleMCPBridge.Runtime;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
@@ -25,6 +25,8 @@ namespace SimpleMCPBridge
             public string serverIp = "127.0.0.1";
             public int serverPort = 45678;
             public string encryptionKey = "";
+            /// <summary>桥 id 友好段（<engine>-<project>-<guid>）。留空回退 Application.productName（slug 化）。</summary>
+            public string projectName = "";
             /// <summary>追加的 scene.call_component_method 拦截项：可含 "MethodName" 或 "TypeName.MethodName"。空数组 = 无追加。</summary>
             public string[] methodBlocklist = new string[0];
             /// <summary>scene.call_component_method 白名单：非空 = 白名单模式（同上两种格式）。空数组 = 关闭。</summary>
@@ -33,6 +35,9 @@ namespace SimpleMCPBridge
 
         /// <summary>Shared encryption key for AES-256-CBC payload encryption. Empty = no encryption.</summary>
         public static string EncryptionKey { get; private set; } = "";
+
+        /// <summary>桥 id 友好段（projectName 配置 → 回退 Application.productName，Slugify 后使用）。</summary>
+        public static string ProjectName { get; private set; } = "";
 
         /// <summary>追加拦截项（来自 config.methodBlocklist，已清洗）。代码默认黑名单始终生效、不在此处。</summary>
         public static string[] MethodBlocklistExtra { get; private set; } = new string[0];
@@ -107,6 +112,7 @@ namespace SimpleMCPBridge
                 ip = config.serverIp;
                 port = config.serverPort;
                 EncryptionKey = config.encryptionKey ?? "";
+                ProjectName = config.projectName ?? "";
                 MethodBlocklistExtra = SanitizeList(config.methodBlocklist);
                 MethodAllowlist = SanitizeList(config.methodAllowlist);
                 return true;
@@ -132,6 +138,30 @@ namespace SimpleMCPBridge
                 list.Add(item.Trim());
             }
             return list.ToArray();
+        }
+
+        /// <summary>
+        /// 桥 id 友好段规范化（与 Godot 桥 MCPBridge.gd._slugify 规则一致）：
+        /// 仅保留 ASCII a-z / 0-9，大写转小写，其余 → '-'，压缩连续 '-'，去首尾 '-'；结果为空 → "unknown"。
+        /// </summary>
+        public static string Slugify(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "unknown";
+            var sb = new System.Text.StringBuilder(s.Length);
+            foreach (char c in s)
+            {
+                if (c >= 'a' && c <= 'z' || c >= '0' && c <= '9')
+                    sb.Append(c);
+                else if (c >= 'A' && c <= 'Z')
+                    sb.Append(char.ToLowerInvariant(c));
+                else
+                    sb.Append('-');
+            }
+            string slug = sb.ToString();
+            while (slug.Contains("--"))
+                slug = slug.Replace("--", "-");
+            slug = slug.Trim('-');
+            return slug.Length == 0 ? "unknown" : slug;
         }
 
         /// <summary>目标配置文件路径：Editor 在项目 Assets 下，Player 在 persistentDataPath。</summary>

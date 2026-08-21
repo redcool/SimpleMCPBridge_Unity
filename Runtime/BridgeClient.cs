@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Threading.Tasks;
 using SimpleMCPBridge;
@@ -41,10 +41,20 @@ namespace SimpleMCPBridge.Runtime
         public string Host { get; private set; } = "127.0.0.1";
         public int Port { get; private set; } = 45678;
         public bool IsConnected => _client != null && _client.IsConnected;
-        /// <summary>Unique identifier for this bridge instance. Set once on construction;
-        /// changing it externally would break server-side routing (toolToBridge keys on it),
-        /// so the setter is private. Server reads it via register_tools payload.</summary>
-        public string BridgeId { get; private set; } = Guid.NewGuid().ToString("N");
+        /// <summary>Unique identifier for this bridge instance: <engine>-<project>-<guid>.
+        /// Server routes toolToBridge on this id, so it must stay stable per connection.
+        /// Changing it externally would break server-side routing, so the setter is private.</summary>
+        public string BridgeId { get; private set; } = BuildBridgeId();
+
+        /// <summary>构造三段式桥 id：engine 固定 "unity"，project 段取 config.projectName
+        /// （回退 Application.productName）slug 化，guid 段保证唯一。</summary>
+        private static string BuildBridgeId()
+        {
+            var project = SimpleMCPBridge.BridgeConfig.ProjectName;
+            if (string.IsNullOrEmpty(project))
+                project = Application.productName;
+            return "unity-" + SimpleMCPBridge.BridgeConfig.Slugify(project) + "-" + Guid.NewGuid().ToString("N");
+        }
 
         /// <summary>
         /// Shared default bridge instance.

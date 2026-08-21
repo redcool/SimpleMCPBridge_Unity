@@ -150,6 +150,7 @@
 > 已固化到 AGENTS.md Known Issues 的:MPEG4Writer 音频轨道(1)、BuildJsonObject 字符串预引号(2)、InputSystem.Update 阻塞(3)、服务器需可见 cmd 窗口(5)、多 Bridge 路由 Editor(6)、同内容 AB 只能加载一次(7)、uitk.click 隐藏 gate(8)、编译错误静默阻断 Play Mode(9)、URP DebugUpdater+EnhancedTouch SIGSEGV(10)、il2cpp setter 裁剪(11)
 
 - **Bridge ID 每次重连都会变**:ID 每连接新生成(非持久),重连后旧 ID 立即失效报 `Bridge '<id>' not found`。调用前先 `GET /health` 或 `bridge.list` 取最新 ID,勿缓存/勿手写(本会话因过期 ID 多次踩坑)
+- **Bridge ID 三段式格式(2026-08 起)**:`<engine>-<project>-<guid>` = `unity-<projectName slug>-<32hex>`。projectName 取 bridge-config.json `projectName`(空则回退 `Application.productName`),slug 规则见 `BridgeConfig.Slugify`(与 Godot 桥 `MCPBridge.gd._slugify` 一致:仅 ASCII a-z/0-9,大写转小写,其余→'-',空→"unknown")。archived: 旧格式纯 GUID
 - **il2cpp setter 裁剪使 set_component_property 报 not found(非桥 bug)**:Android 上对工程未引用的属性(如 Rigidbody.mass/drag)报 not found,但 get 侧能读到值;Editor 同调用成功。诊断:对比两端 propertyCount(Android 9 vs Editor 51)。解决:工程侧引用一次 setter(`rb.mass = rb.mass`)/降低 stripping/link.xml 保留
 - **call_component_method 重载参数必须给全**:`args` 命名映射 + 完整重载参数(如 AddForce 需 `force`+`mode`,缺 mode 报 "Missing required argument")。box_cast/overlap_box 参数名是 `halfExtents`(不是 size);game.set_time_scale 用 `value`(**camera.screenshot 的 savePath 已改可选**,2026-08)
 
@@ -180,7 +181,7 @@
 | `H:\ai_works\SimpleMcpServer\src\tools.ts` | SERVER_TOOLS + getMergedTools(来源标注 `[bridge: ip:port (id)]`) |
 | `H:\ai_works\SimpleMcpServer\src\ab.ts` | AB 传输(handleABRequest + bestHostForBridge/getLanIp/sameSubnet) |
 | `H:\ai_works\SimpleMcpServer\config.json.template` | 完整配置模板(allowedIps 默认本机 + llm 段 + evalEnabled) |
-| `Runtime/BridgeClient.cs` | NetWebSocketClient(135)、BridgeId=GUID(43)、DrainQueue 帧预算(214-229) |
+| `Runtime/BridgeClient.cs` | NetWebSocketClient(135)、BridgeId 三段式(47 区域,引擎-unity)、DrainQueue 帧预算(214-229) |
 | `Runtime/UrpDebugGuard.cs` | (新,2026-08)URP DebugUpdater 崩溃防护 —— BeforeSceneLoad 关 enableRuntimeUI,Known Issue #10 |
 | `Runtime/Config/BridgeConfig.cs` | ConfigData.methodBlocklist/methodAllowlist + SanitizeList + 静态缓存 |
 | `Runtime/Handlers/SceneHandler.cs` | LoadScene(1004)/ResolveScenePath(已修 bug)、SavePrefab(1345)、方法四重门(EnsureMethodAccessCache)、SetComponentProperty il2cpp 枚举回退分支(381-396) |
