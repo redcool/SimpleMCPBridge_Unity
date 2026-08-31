@@ -155,16 +155,13 @@ namespace SimpleMCPBridge.Runtime
 
                     if (result.MessageType == WebSocketMessageType.Text)
                     {
-                        var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-
-                        // Accumulate fragmented frames
+                        var sb = new StringBuilder(Encoding.UTF8.GetString(buffer, 0, result.Count));
                         while (!result.EndOfMessage)
                         {
                             result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer), token);
-                            message += Encoding.UTF8.GetString(buffer, 0, result.Count);
+                            sb.Append(Encoding.UTF8.GetString(buffer, 0, result.Count));
                         }
-
-                        OnMessageReceived?.Invoke(message);
+                        OnMessageReceived?.Invoke(sb.ToString());
                     }
                     // Binary messages are ignored
                 }

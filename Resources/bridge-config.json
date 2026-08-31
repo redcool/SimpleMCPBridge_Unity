@@ -1,6 +1,6 @@
 {
-    "serverIp": "10.0.46.244",
-    "serverPort": 45678,
+     "serverIp": "127.0.0.1",
+     "serverPort": 45678,
     "encryptionKey": "",
     "methodBlocklist": [],
     "methodAllowlist": []

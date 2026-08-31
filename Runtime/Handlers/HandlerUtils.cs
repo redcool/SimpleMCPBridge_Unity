@@ -154,6 +154,12 @@ namespace SimpleMCPBridge.Runtime.Handlers
             return null;
         }
 
+        /// <summary>Required float param (throws when missing). Shared by GameStateHandler (game.wait) etc.</summary>
+        public static float GetRequiredFloat(Dictionary<string, object> dict, string key)
+        {
+            return Convert.ToSingle(GetRequiredString(dict, key), CultureInfo.InvariantCulture);
+        }
+
         public static bool? GetOptionalBool(Dictionary<string, object> dict, string key)
         {
             if (!dict.TryGetValue(key, out var v) || v == null) return null;
@@ -280,6 +286,49 @@ namespace SimpleMCPBridge.Runtime.Handlers
             }
             segments.Reverse();
             return string.Join("/", segments);
+        }
+
+        /// <summary>
+        /// Parse a JSON array of objects into a list of dictionaries.
+        /// Handles the minimal JSON format produced by the bridge's JSON helper.
+        /// (从 GameHandler 私有方法上移共享；GameStateHandler 等新 Handler 层共用)
+        /// </summary>
+        public static List<Dictionary<string, object>> ParseJsonArrayOfObjects(string json)
+        {
+            var result = new List<Dictionary<string, object>>();
+            if (string.IsNullOrEmpty(json) || json.Trim() == "[]") return result;
+
+            json = json.Trim();
+            if (!json.StartsWith("[") || !json.EndsWith("]")) return result;
+
+            var inner = json.Substring(1, json.Length - 2);
+            var depth = 0;
+            var start = 0;
+            bool inStr = false;
+
+            for (int i = 0; i < inner.Length; i++)
+            {
+                char c = inner[i];
+                if (c == '"' && (i == 0 || inner[i - 1] != '\\')) inStr = !inStr;
+                if (!inStr)
+                {
+                    if (c == '{') depth++;
+                    if (c == '}') depth--;
+                    if (c == ',' && depth == 0)
+                    {
+                        var objStr = inner.Substring(start, i - start);
+                        if (!string.IsNullOrWhiteSpace(objStr))
+                            result.Add(ParseJsonObject(objStr));
+                        start = i + 1;
+                    }
+                }
+            }
+
+            var last = inner.Substring(start);
+            if (!string.IsNullOrWhiteSpace(last))
+                result.Add(ParseJsonObject(last));
+
+            return result;
         }
     }
 }

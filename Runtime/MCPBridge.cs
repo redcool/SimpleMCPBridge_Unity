@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -142,7 +142,7 @@ namespace SimpleMCPBridge.Runtime
             MouseDeviceTools.TickDeferredClick();
             Tools.GamepadTools.TickRumble();
 #endif
-            Handlers.GameHandler.TickWatch();
+            Handlers.Game.GameWatchHandler.TickWatch();
 
             if (_bridge.IsAutoReconnect && !_bridge.IsConnected && EditorApplication.timeSinceStartup - _lastAttemptTime > ReconnectInterval)
             {
@@ -167,7 +167,7 @@ namespace SimpleMCPBridge.Runtime
             MouseDeviceTools.TickDeferredClick();
             Tools.GamepadTools.TickRumble();
 #endif
-            Handlers.GameHandler.TickWatch();
+            Handlers.Game.GameWatchHandler.TickWatch();
 
             if (_bridge.IsAutoReconnect && !_bridge.IsConnected && Time.unscaledTime - _lastAttemptTime > ReconnectInterval)
             {
@@ -217,14 +217,27 @@ namespace SimpleMCPBridge.Runtime
             CompilationPipeline.compilationFinished -= OnCompilationFinished;
             EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
 #endif
-            // Don't disconnect BridgeClient.Default — it may be shared by other
-            // MCPBridge instances (e.g. after domain-reload bootstrap creates a
-            // new one before the old inactive one is destroyed).
-            if (_bridge != null)
+            if (_bridge == null) return;
+            var isDefault = ReferenceEquals(_bridge, BridgeClient.Default);
+            _bridge.IsAutoReconnect = false;
+            // 仅当本实例独占 Default 时才 Disconnect 并清 Default，避免域重载时误杀新实例的连接
+            if (isDefault)
             {
-                _bridge.IsAutoReconnect = false; // stop retry loop
-                _bridge = null;
+                var others = FindObjectsByType<MCPBridge>(FindObjectsSortMode.None);
+                bool hasLiveOther = false;
+                foreach (var o in others) if (o != this && o.enabled) { hasLiveOther = true; break; }
+                if (!hasLiveOther)
+                {
+                    _bridge.Disconnect();
+                    BridgeClient.Default = null;
+                }
             }
+            else
+            {
+                // 非 Default 的孤立 client，直接断开防泄漏
+                try { _bridge.Disconnect(); } catch { }
+            }
+            _bridge = null;
         }
 
 

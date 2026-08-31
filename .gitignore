@@ -1,0 +1,17 @@
+# SimpleMCPBridge local config - don't commit user-local bridge config
+Assets/SimpleMCPBridge-config/
+Assets/SimpleMCPBridge-config/bridge-config.json
+# Logs
+Logs/mcp_bridge_debug.log
+# Unity generated
+Library/
+Temp/
+Obj/
+Build/
+Builds/
+Logs/
+UserSettings/
+MemoryCaptures/
+# OS
+.DS_Store
+Thumbs.db

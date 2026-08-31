@@ -132,8 +132,10 @@ namespace SimpleMCPBridge.Runtime
 
             Host = host;
             Port = port;
+            // 每次发起连接刷新 BridgeId，保证重连后 server 路由到最新 ID（与文档“每次连接新 GUID”一致）
+            BridgeId = BuildBridgeId();
 
-            Log($"ConnectToServer({host}:{port})");
+            Log($"ConnectToServer({host}:{port}) [{BridgeId}]");
 
             // Force-clean any previous client (even stuck-connecting ones)
             if (_client != null)
