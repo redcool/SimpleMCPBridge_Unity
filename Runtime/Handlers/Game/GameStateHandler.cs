@@ -275,7 +275,7 @@ namespace SimpleMCPBridge.Runtime.Handlers.Game
                     ("player", playerJson),
                     ("camera", cameraJson),
                     ("activeAxes", axesJson),
-                    ("uiTextCount", includeUI ? (uiTexts.Count > 0 ? uiTexts.Count.ToString(CultureInfo.InvariantCulture) : "0") : "skipped"),
+                    ("uiTextCount", includeUI ? (uiTexts.Count > 0 ? uiTexts.Count.ToString(CultureInfo.InvariantCulture) : "0") : "\"skipped\""),
                     ("uiTexts", textsJson),
                     ("interactiveUI", uiElementsJson)
                 );
