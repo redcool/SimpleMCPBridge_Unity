@@ -812,7 +812,9 @@ namespace SimpleMCPBridge.Runtime.Handlers.Game
         private static float GetFloat(Dictionary<string, object> dict, string key, float defaultValue = 0f)
         {
             if (!dict.TryGetValue(key, out var v)) return defaultValue;
-            return Convert.ToSingle(v, CultureInfo.InvariantCulture);
+            // Reject NaN/Infinity - they would corrupt game state / scenes (P7).
+            try { return HandlerUtils.ToFiniteSingle(v, key, CultureInfo.InvariantCulture); }
+            catch (System.Exception) { return defaultValue; }
         }
 
         /// <summary>

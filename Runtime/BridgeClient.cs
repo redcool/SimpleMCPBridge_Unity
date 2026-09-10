@@ -36,11 +36,18 @@ namespace SimpleMCPBridge.Runtime
         private readonly ConcurrentQueue<Action> _mainThreadQueue = new();
         private int _tickCount;
         private bool _serverEncryptionEnabled = false;
+        // In-flight connect guard: MCPBridge.Update retries every ReconnectInterval,
+        // but a connect attempt can take up to 10s to time out. Without this guard
+        // every retry kills the previous attempt and starts a new one (reconnect
+        // storm — P7). volatile: written from ConnectAsync thread, read on main.
+        private volatile bool _isConnecting;
 
         // ── Public properties ──
         public string Host { get; private set; } = "127.0.0.1";
         public int Port { get; private set; } = 45678;
         public bool IsConnected => _client != null && _client.IsConnected;
+        /// <summary>True while a connect attempt is in flight (P7: prevents reconnect storm).</summary>
+        public bool IsConnecting => _isConnecting;
         /// <summary>Unique identifier for this bridge instance: <engine>-<project>-<guid>.
         /// Server routes toolToBridge on this id, so it must stay stable per connection.
         /// Changing it externally would break server-side routing, so the setter is private.</summary>
@@ -129,6 +136,10 @@ namespace SimpleMCPBridge.Runtime
         public void ConnectToServer(string host, int port)
         {
             if (IsConnected) return;
+            // P7: reconnect storm guard — a connect attempt can take ~10s to time out
+            // while MCPBridge retries every 3s. Ignore retries while one is in flight
+            // instead of killing the previous attempt and starting another.
+            if (_isConnecting) return;
 
             Host = host;
             Port = port;
@@ -155,6 +166,7 @@ namespace SimpleMCPBridge.Runtime
             _client.OnDisconnected += OnServerDisconnected;
             _client.OnError += OnServerError;
 
+            _isConnecting = true;
             _ = ConnectAsync(host, port);
         }
 
@@ -164,6 +176,7 @@ namespace SimpleMCPBridge.Runtime
         public void Disconnect()
         {
             Log("Disconnect called");
+            _isConnecting = false;
             _client?.Dispose();
             _client = null;
             // _router is created once in constructor — do NOT null it
@@ -268,6 +281,12 @@ namespace SimpleMCPBridge.Runtime
                 LogWarning($"Cannot reach SimpleMcpServer at {Host}:{Port} — {ex.Message}");
                 OnConnectionFailed?.Invoke(reason);
             }
+            finally
+            {
+                // Clear the in-flight guard so a later retry can start a fresh attempt
+                // (P7 reconnect storm fix — must run even when the client was swapped).
+                _isConnecting = false;
+            }
         }
 
         /// <summary>
@@ -300,8 +319,10 @@ namespace SimpleMCPBridge.Runtime
             // ── Server info notification (encryption flag, etc.) ──
             if (msgType == "server_info")
             {
-                var encStr = ExtractJsonString(rawMessage, "encryption");
-                _serverEncryptionEnabled = encStr == "true";
+                // Server sends a RAW JSON boolean (`"encryption":true`), not a quoted
+                // string — ExtractJsonString would return null and we'd silently think
+                // encryption is off (P7: broken security boundary). Parse the bool.
+                _serverEncryptionEnabled = ExtractJsonBool(rawMessage, "encryption");
                 Log($"Server info: encryption={_serverEncryptionEnabled}");
                 // Don't send a response — this is a notification
                 return;
@@ -520,6 +541,42 @@ namespace SimpleMCPBridge.Runtime
                 start++;
             }
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Extract a JSON boolean field (raw `true`/`false`, or a quoted "true"/"false").
+        /// Reuses ExtractJsonString's key-locating logic but accepts an unquoted literal.
+        /// Returns false when the key is absent (defaults safe for optional flags).
+        /// </summary>
+        private static bool ExtractJsonBool(string json, string key)
+        {
+            var pattern = $"\"{key}\"";
+            var idx = json.IndexOf(pattern, StringComparison.Ordinal);
+            while (idx >= 0)
+            {
+                int i = idx - 1;
+                while (i >= 0 && char.IsWhiteSpace(json[i])) i--;
+                if (i < 0 || json[i] == '{' || json[i] == ',')
+                    break;
+                idx = json.IndexOf(pattern, idx + 1, StringComparison.Ordinal);
+            }
+            if (idx < 0) return false;
+            var colon = json.IndexOf(':', idx);
+            if (colon < 0) return false;
+            var start = colon + 1;
+            while (start < json.Length && (json[start] == ' ' || json[start] == '\t' || json[start] == '\n' || json[start] == '\r')) start++;
+            if (start >= json.Length) return false;
+            // Unquoted raw literal: true / false
+            if (json[start] != '"')
+            {
+                var end = start;
+                while (end < json.Length && (char.IsLetter(json[end]) || json[end] == '_')) end++;
+                var lit = json.Substring(start, end - start);
+                return string.Equals(lit, "true", StringComparison.OrdinalIgnoreCase);
+            }
+            // Quoted "true"/"false" — reuse string extraction
+            var quoted = ExtractJsonString(json, key);
+            return string.Equals(quoted, "true", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

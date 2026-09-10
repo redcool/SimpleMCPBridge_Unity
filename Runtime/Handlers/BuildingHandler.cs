@@ -144,6 +144,21 @@ namespace SimpleMCPBridge.Runtime.Handlers
         }
 
         /// <summary>
+        /// Escape a raw string for safe interpolation inside a single-quoted Lua
+        /// string literal (P7: prevents Lua injection via crafted object names).
+        /// </summary>
+        private static string EscapeLuaStringLiteral(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            return s
+                .Replace("\\", "\\\\") // backslash first — must not double-escape the escapes below
+                .Replace("'", "\\'")
+                .Replace("\n", "\\n")
+                .Replace("\r", "\\r")
+                .Replace("\t", "\\t");
+        }
+
+        /// <summary>
         /// Fire a FakeHitResultEvent on the Lua EventHandler via xLua.
         /// Uses reflection to find LuaManager.Instance.Env.DoString.
         /// </summary>
@@ -236,7 +251,11 @@ namespace SimpleMCPBridge.Runtime.Handlers
                 string posX = worldPoint.x.ToString("R", CultureInfo.InvariantCulture);
                 string posY = worldPoint.y.ToString("R", CultureInfo.InvariantCulture);
                 string posZ = worldPoint.z.ToString("R", CultureInfo.InvariantCulture);
-                string objName = go.name;
+                // P7 Lua injection fix: the object name is interpolated into a Lua
+                // string literal ('{...}'). A name containing a quote, newline or
+                // Lua comment marker could break out of the literal and run
+                // arbitrary Lua. Escape it as a proper Lua string literal.
+                string objName = EscapeLuaStringLiteral(go.name);
 
                 string script = $@"
 local success = false

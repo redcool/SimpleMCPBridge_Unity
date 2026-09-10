@@ -2,6 +2,7 @@
 using System;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.Controls;
 using UnityEngine.InputSystem.LowLevel;
 
 namespace SimpleMCPBridge
@@ -12,8 +13,10 @@ namespace SimpleMCPBridge
     /// directly to Keyboard.current, NOT a virtual device.
     ///
     /// 🎯 TRACKED STATE: Tracks which keys were pressed via this tool.
-    /// Physical keyboard keys are NEVER released — only AI-pressed keys are managed.
-    /// Each HoldKey replaces ALL tracked keys with the new set (full state snapshot).
+    /// Physical keyboard keys are NEVER released by building a zeroed snapshot —
+    /// each applied state copies the CURRENT device state (physical keys stay held),
+    /// then only keys the bridge previously injected and is now retracting are
+    /// unpressed (P7 zero-pop fix). HoldKey replaces ALL tracked keys with a new set.
     /// </summary>
     public static class KeyboardTools
     {
@@ -33,15 +36,18 @@ namespace SimpleMCPBridge
             if (kbd == null)
                 throw new InvalidOperationException("No physical keyboard device found (Keyboard.current is null)");
 
-            // Build a state snapshot with just the tracked keys + this new key
-            var state = BuildTrackedState();
-            state.Press(key);
-            InputSystem.QueueStateEvent(kbd, state);
+            // Capture the physical baseline ONCE (keys the user actually holds +
+            // currently tracked AI keys). Both the press and the release reuse this
+            // same snapshot so the tapped key never leaks into the release state
+            // and physical keys are never popped (P7 zero-pop fix).
+            var baseState = BuildTrackedState(null);
+            var downState = baseState; // struct copy
+            downState.Press(key);
+            InputSystem.QueueStateEvent(kbd, downState);
             InputSystem.Update();
 
-            // Release: restore tracked state (without the tapped key)
-            var releaseState = BuildTrackedState();
-            InputSystem.QueueStateEvent(kbd, releaseState);
+            // Release: restore the baseline (tapped key not included → released)
+            InputSystem.QueueStateEvent(kbd, baseState);
             InputSystem.Update();
         }
 
@@ -56,13 +62,14 @@ namespace SimpleMCPBridge
             if (kbd == null)
                 throw new InvalidOperationException("No physical keyboard device found (Keyboard.current is null)");
 
+            // Retract whatever the bridge previously held but is no longer tracked,
+            // so replacing the hold set never leaves stale AI keys pressed — and
+            // never touches physical keys (P7 zero-pop fix).
+            var retract = new System.Collections.Generic.HashSet<Key>(_trackedKeys);
+            retract.Remove(key);
             _trackedKeys.Clear();
             _trackedKeys.Add(key);
-
-            var state = new KeyboardState();
-            state.Press(key);
-            InputSystem.QueueStateEvent(kbd, state);
-            InputSystem.Update();
+            ApplyTrackedState(retract);
         }
 
         /// <summary>
@@ -75,15 +82,15 @@ namespace SimpleMCPBridge
             if (kbd == null)
                 throw new InvalidOperationException("No physical keyboard device found (Keyboard.current is null)");
 
-            _trackedKeys.Clear();
-            var state = new KeyboardState();
+            // Retract any previously held AI keys that are not in the new set
+            // (P7 zero-pop fix — physical keys are preserved via the copy).
+            var retract = new System.Collections.Generic.HashSet<Key>(_trackedKeys);
             foreach (var k in keys)
-            {
+                retract.Remove(k);
+            _trackedKeys.Clear();
+            foreach (var k in keys)
                 _trackedKeys.Add(k);
-                state.Press(k);
-            }
-            InputSystem.QueueStateEvent(kbd, state);
-            InputSystem.Update();
+            ApplyTrackedState(retract);
         }
 
         /// <summary>
@@ -92,8 +99,8 @@ namespace SimpleMCPBridge
         /// </summary>
         public static void ReleaseKey(Key key)
         {
-            _trackedKeys.Remove(key);
-            ApplyTrackedState();
+            if (!_trackedKeys.Remove(key)) return; // not held by bridge — nothing to do
+            ApplyTrackedState(new[] { key });
         }
 
         /// <summary>
@@ -101,17 +108,32 @@ namespace SimpleMCPBridge
         /// </summary>
         public static void ReleaseAllKeys()
         {
+            if (_trackedKeys.Count == 0) return;
+            var retract = new System.Collections.Generic.HashSet<Key>(_trackedKeys);
             _trackedKeys.Clear();
-            ApplyTrackedState();
+            ApplyTrackedState(retract);
         }
 
         /// <summary>
-        /// Build a KeyboardState with only the currently tracked keys pressed.
-        /// All other keys get 0 (released).
+        /// Build a KeyboardState from the CURRENT device state (physical keys stay
+        /// held — P7 zero-pop fix) with the given keys retracted (unpressed) and all
+        /// currently tracked keys forced pressed.
         /// </summary>
-        private static KeyboardState BuildTrackedState()
+        private static KeyboardState BuildTrackedState(System.Collections.Generic.ICollection<Key> retract)
         {
             var state = new KeyboardState();
+            var kbd = Keyboard.current;
+            if (kbd == null) return state;
+
+            // Copy the current device state: every key the user physically holds
+            // (plus still-tracked injected keys) stays pressed.
+            foreach (var ctrl in kbd.allControls)
+            {
+                if (ctrl is KeyControl kc && kc.isPressed && (retract == null || !retract.Contains(kc.keyCode)))
+                    state.Press(kc.keyCode);
+            }
+            // Ensure all tracked keys are pressed (covers keys queued this frame that
+            // the device state has not yet reflected).
             foreach (var k in _trackedKeys)
                 state.Press(k);
             return state;
@@ -120,12 +142,12 @@ namespace SimpleMCPBridge
         /// <summary>
         /// Apply the current tracked state to the physical keyboard device.
         /// </summary>
-        private static void ApplyTrackedState()
+        private static void ApplyTrackedState(System.Collections.Generic.ICollection<Key> retract = null)
         {
             var kbd = Keyboard.current;
             if (kbd == null) return;
 
-            InputSystem.QueueStateEvent(kbd, BuildTrackedState());
+            InputSystem.QueueStateEvent(kbd, BuildTrackedState(retract));
             InputSystem.Update();
         }
 

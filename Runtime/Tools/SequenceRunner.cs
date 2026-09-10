@@ -83,11 +83,26 @@ namespace SimpleMCPBridge.Runtime.Tools
             public bool Completed;
             public string Error;
             public bool Running;
+            public double CompletedAt; // P7 leak fix: reliable cleanup stamp for ALL completion paths
             public List<string> StepLog;
 
             // ── Control-flow state ──
             public List<TryContext> TryStack = new();
             public List<RepeatState> RepeatStack = new();
+        }
+
+        /// <summary>
+        /// Mark a sequence finished (completed or failed). Records CompletedAt so the
+        /// cleanup pass can reap it — the old code relied on callers adding the id to
+        /// a `done` local list, and #else branches (no Input System builds) skipped
+        /// that, leaking every such sequence forever (P7).
+        /// </summary>
+        private static void CompleteSequence(ActiveSequence seq, string error, double now)
+        {
+            seq.Completed = true;
+            seq.Running = false;
+            seq.CompletedAt = now;
+            if (error != null) seq.Error = error;
         }
 
         /// <summary>
@@ -150,10 +165,8 @@ namespace SimpleMCPBridge.Runtime.Tools
                 // Check timeout
                 if (now - seq.StartTime > seq.Timeout)
                 {
-                    seq.Completed = true;
-                    seq.Running = false;
-                    seq.Error = "timeout";
                     seq.StepLog.Add($"TIMEOUT at step {seq.CurrentStep}/{seq.Steps.Count}");
+                    CompleteSequence(seq, "timeout", now);
                     done.Add(seq.Id);
                     continue;
                 }
@@ -210,9 +223,7 @@ namespace SimpleMCPBridge.Runtime.Tools
                                 seq.StepLog.Add($"{log} key={keyName} action={action}");
 #else
                                 seq.StepLog.Add($"{log} SKIPPED (no Input System)");
-                                seq.Error = $"Step {seq.CurrentStep + 1}: key requires Input System";
-                                seq.Completed = true;
-                                seq.Running = false;
+                                CompleteSequence(seq, $"Step {seq.CurrentStep + 1}: key requires Input System", now);
 #endif
                                 seq.CurrentStep++;
                                 break;
@@ -227,10 +238,8 @@ namespace SimpleMCPBridge.Runtime.Tools
                                 MouseDeviceTools.ClickMouse(new Vector2(mx, my), btn);
                                 seq.StepLog.Add($"{log} ({mx:F2},{my:F2}) btn={btn}");
 #else
-                                seq.Error = "mouse_click requires Input System (not available in this build)";
                                 seq.StepLog.Add($"{log} ERROR: no Input System");
-                                seq.Completed = true;
-                                seq.Running = false;
+                                CompleteSequence(seq, "mouse_click requires Input System (not available in this build)", now);
 #endif
                                 seq.CurrentStep++;
                                 break;
@@ -244,10 +253,8 @@ namespace SimpleMCPBridge.Runtime.Tools
                                 MouseDeviceTools.MoveMouse(new Vector2(dx, dy));
                                 seq.StepLog.Add($"{log} delta=({dx:F0},{dy:F0})");
 #else
-                                seq.Error = "mouse_move requires Input System (not available in this build)";
                                 seq.StepLog.Add($"{log} ERROR: no Input System");
-                                seq.Completed = true;
-                                seq.Running = false;
+                                CompleteSequence(seq, "mouse_move requires Input System (not available in this build)", now);
 #endif
                                 seq.CurrentStep++;
                                 break;
@@ -492,9 +499,7 @@ namespace SimpleMCPBridge.Runtime.Tools
                         if (!HandleTryError(seq, stepBeforeExec))
                         {
                             // Not caught — terminate sequence
-                            seq.Completed = true;
-                            seq.Running = false;
-                            seq.StepStartTime = now;
+                            CompleteSequence(seq, seq.Error, now);
                             done.Add(seq.Id);
                             break; // Exit while loop to prevent spin on errored step
                         }
@@ -563,9 +568,7 @@ namespace SimpleMCPBridge.Runtime.Tools
 
                     if (seq.Error != null && !HandleTryError(seq, stepBeforeExec))
                     {
-                        seq.Completed = true;
-                        seq.Running = false;
-                        seq.StepStartTime = now;
+                        CompleteSequence(seq, seq.Error, now);
                         done.Add(seq.Id);
                         break;
                     }
@@ -574,21 +577,24 @@ namespace SimpleMCPBridge.Runtime.Tools
                 // All steps done
                 if (seq.CurrentStep >= seq.Steps.Count && !waiting)
                 {
-                    seq.Completed = true;
-                    seq.Running = false;
                     var totalTime = now - seq.StartTime;
                     seq.StepLog.Add($"SEQUENCE DONE in {totalTime:F2}s");
+                    CompleteSequence(seq, null, now);
                     done.Add(seq.Id);
                 }
             }
 
-            // Cleanup completed sequences after 5 seconds
-            foreach (var id in done)
+            // Cleanup completed sequences after 5 seconds.
+            // P7 leak fix: reap by CompletedAt (stamped on EVERY completion path),
+            // not by membership in `done` — #else branches used to complete a
+            // sequence without adding its id here, leaking it forever.
+            var reapAt = now - 5.0;
+            for (int i = _sequences.Count - 1; i >= 0; i--)
             {
-                var s = _sequences.FirstOrDefault(x => x.Id == id);
-                if (s != null && (now - (s.StepStartTime > 0 ? s.StepStartTime : s.StartTime)) > 5.0)
+                var s = _sequences[i];
+                if (s.Completed && !s.Running && s.CompletedAt <= reapAt && s.CompletedAt > 0)
                 {
-                    _sequences.Remove(s);
+                    _sequences.RemoveAt(i);
                 }
             }
         }
@@ -888,7 +894,9 @@ namespace SimpleMCPBridge.Runtime.Tools
         private static float GetFloat(Dictionary<string, object> dict, string key, float defaultValue = 0f)
         {
             if (!dict.TryGetValue(key, out var v)) return defaultValue;
-            return Convert.ToSingle(v, CultureInfo.InvariantCulture);
+            // Reject NaN/Infinity — they would corrupt game state (P7).
+            try { return ToFiniteSingle(v, key, System.Globalization.CultureInfo.InvariantCulture); }
+            catch (System.Exception) { return defaultValue; }
         }
 
         private static float GetRequiredFloat(Dictionary<string, object> dict, string key)

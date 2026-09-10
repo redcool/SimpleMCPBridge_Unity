@@ -1,4 +1,4 @@
-﻿#if UNITY_INPUT_SYSTEM
+#if UNITY_INPUT_SYSTEM
 using System;
 using System.Runtime.InteropServices;
 using UnityEngine;
@@ -111,6 +111,12 @@ namespace SimpleMCPBridge
             // ── Input System fallback path ──
             var mouse = EnsureDefaultMouse();
             var screenPos = new Vector2(Screen.width * screenUV.x, Screen.height * screenUV.y);
+            // P7 pixel/desktop mismatch: QueueStateEvent alone only sets the virtual
+            // device state — the OS cursor is left behind, so anything that later
+            // reads the real cursor (or click-through to other windows) is off by
+            // the window offset. Warp the hardware cursor to the same pixel first.
+            try { mouse.WarpCursorPosition(screenPos); } catch { /* not available on all platforms */ }
+
             var buttonsMask = 1 << buttonId;
 
             var mouseState = new MouseState
@@ -120,6 +126,7 @@ namespace SimpleMCPBridge
                 clickCount = 1,
             };
             InputSystem.QueueStateEvent(mouse, mouseState);
+            InputSystem.Update();
 
             _pendingClickUV = screenUV;
             _pendingClickButton = buttonId;
@@ -154,6 +161,10 @@ namespace SimpleMCPBridge
         /// <summary>
         /// Move mouse by pixel delta (for camera look/aim).
         /// Uses Input System (no Win32 equivalent needed).
+        /// P7: the old code overwrote position with the stale current value instead
+        /// of applying the delta, so absolute readers saw no movement — accumulate
+        /// the delta into position so both the delta control and the position
+        /// control stay consistent.
         /// </summary>
         public static void MoveMouse(Vector2 delta)
         {
@@ -168,7 +179,7 @@ namespace SimpleMCPBridge
 
             var mouseState = new MouseState
             {
-                position = mouse.position.ReadValue(),
+                position = mouse.position.ReadValue() + delta,
                 delta = delta,
                 buttons = (ushort)buttons,
             };

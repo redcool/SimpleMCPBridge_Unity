@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using SimpleMCPBridge.Runtime.Tools;
@@ -468,7 +468,9 @@ namespace SimpleMCPBridge.Runtime.Handlers
         {
             if (!dict.TryGetValue(key, out var v))
                 return defaultValue;
-            return Convert.ToSingle(v, CultureInfo.InvariantCulture);
+            // Reject NaN/Infinity — they would corrupt simulated input state (P7).
+            try { return HandlerUtils.ToFiniteSingle(v, key, CultureInfo.InvariantCulture); }
+            catch (System.Exception) { return defaultValue; }
         }
 #endif // UNITY_INPUT_SYSTEM
 

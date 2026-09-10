@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -167,8 +167,16 @@ namespace SimpleMCPBridge
 
             var rawStr = rawValue.ToString();
 
-            if (targetType == typeof(float)) return Convert.ToSingle(rawValue, CultureInfo.InvariantCulture);
-            if (targetType == typeof(double)) return Convert.ToDouble(rawValue, CultureInfo.InvariantCulture);
+            // P7: reject NaN/±Infinity for numeric targets — writing NaN into a
+            // component property quietly corrupts serialized data / the whole scene.
+            if (targetType == typeof(float)) return HandlerUtils.ToFiniteSingle(rawValue, "value", CultureInfo.InvariantCulture);
+            if (targetType == typeof(double))
+            {
+                var d = Convert.ToDouble(rawValue, CultureInfo.InvariantCulture);
+                if (!HandlerUtils.IsFinite(d))
+                    throw new ArgumentException($"Component argument must be a finite number, got '{rawValue}'");
+                return d;
+            }
             if (targetType == typeof(int)) return Convert.ToInt32(rawValue, CultureInfo.InvariantCulture);
             if (targetType == typeof(long)) return Convert.ToInt64(rawValue, CultureInfo.InvariantCulture);
             if (targetType == typeof(bool)) return Convert.ToBoolean(rawValue);

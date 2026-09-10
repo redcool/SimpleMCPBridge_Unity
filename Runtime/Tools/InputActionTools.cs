@@ -132,15 +132,15 @@ namespace SimpleMCPBridge.Runtime.Tools
                         applied.Add(kvp.Key);
                         break;
                     case "fire3":
-                        if (val > 0.5f) state.buttons |= (ushort)(1 << (int)GamepadButton.RightStick);
+                        SetButtonBit(ref state.buttons, (int)GamepadButton.RightStick, val > 0.5f);
                         applied.Add(kvp.Key);
                         break;
                     case "submit":
-                        if (val > 0.5f) state.buttons |= (ushort)(1 << (int)GamepadButton.South);
+                        SetButtonBit(ref state.buttons, (int)GamepadButton.South, val > 0.5f);
                         applied.Add(kvp.Key);
                         break;
                     case "cancel":
-                        if (val > 0.5f) state.buttons |= (ushort)(1 << (int)GamepadButton.East);
+                        SetButtonBit(ref state.buttons, (int)GamepadButton.East, val > 0.5f);
                         applied.Add(kvp.Key);
                         break;
                     default:
@@ -176,6 +176,21 @@ namespace SimpleMCPBridge.Runtime.Tools
             }
             // Default: apply to left stick X
             state.leftStick.x = val;
+        }
+
+        /// <summary>
+        /// Set or clear a gamepad button bit by its value threshold.
+        /// P7 sticky-bit fix: the old code only OR-ed bits in, so releasing a
+        /// synthetic axis (val &lt;= 0.5) never cleared the button — it stayed
+        /// pressed across ApplyAxes calls while s_lastGamepadState persisted.
+        /// Note: GamepadState.buttons is a uint — ref must match exactly.
+        /// </summary>
+        private static void SetButtonBit(ref uint buttons, int bit, bool on)
+        {
+            if (on)
+                buttons |= (uint)(1 << bit);
+            else
+                buttons &= (uint)~(1 << bit);
         }
 
         /// <summary>

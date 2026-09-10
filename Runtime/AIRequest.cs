@@ -150,12 +150,24 @@ namespace SimpleMCPBridge.Runtime
                     throw new InvalidOperationException($"Failed to send AI request: {ex.Message}");
                 }
 
-                // Wait for response with timeout (90s)
+                // Wait for response with timeout (90s).
+                // NOTE: do NOT await tcs.Task directly — the 90s timeout token must
+                // actually race the TCS, otherwise timeout is dead code (request hangs
+                // forever when the server never responds). Task.WaitAsync is .NET 6+,
+                // which Unity 2022.3 (.NET Standard 2.1) lacks, so use Task.WhenAny.
                 using (var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(90)))
                 using (var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token))
                 {
                     try
                     {
+                        var timedOut = await Task.WhenAny(tcs.Task, Task.Delay(Timeout.Infinite, linkedCts.Token));
+                        if (timedOut != tcs.Task)
+                        {
+                            // The delay finished first: either the caller cancelled or 90s elapsed.
+                            if (cancellationToken.IsCancellationRequested)
+                                throw new OperationCanceledException();
+                            throw new TimeoutException($"AI request timed out after 90 seconds (requestId: {requestId}). Make sure the server has LLM configured and is responding.");
+                        }
                         return await tcs.Task;
                     }
                     catch (OperationCanceledException)

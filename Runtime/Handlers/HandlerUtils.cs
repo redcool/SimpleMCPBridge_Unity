@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using SimpleMCPBridge.Runtime.Models;
@@ -110,13 +110,13 @@ namespace SimpleMCPBridge.Runtime.Handlers
                 foreach (var item in items)
                 {
                     var trimmed = item.Trim();
-                    if (float.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out var f))
+                    if (float.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out var f) && IsFinite(f))
                         floats.Add(f);
                 }
                 return floats.ToArray();
             }
 
-            if (double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var num))
+            if (double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var num) && IsFinite(num))
             {
                 if (num == Math.Truncate(num) && num >= int.MinValue && num <= int.MaxValue)
                     return (int)num;
@@ -124,6 +124,28 @@ namespace SimpleMCPBridge.Runtime.Handlers
             }
 
             return s;
+        }
+
+        /// <summary>
+        /// True for finite numbers — rejects NaN and ±Infinity, which would otherwise
+        /// poison transforms / serialized assets and corrupt the whole project (P7).
+        /// </summary>
+        public static bool IsFinite(float f) => !float.IsNaN(f) && !float.IsInfinity(f);
+
+        public static bool IsFinite(double d) => !double.IsNaN(d) && !double.IsInfinity(d);
+
+        /// <summary>
+        /// Convert an object to float, rejecting NaN/±Infinity with a clear error.
+        /// Convert.ToSingle("NaN") silently yields float.NaN in .NET — that NaN would
+        /// flow into transforms and permanently corrupt the scene (P7). Shared by all
+        /// numeric accessors.
+        /// </summary>
+        public static float ToFiniteSingle(object v, string key, CultureInfo culture)
+        {
+            var f = Convert.ToSingle(v, culture);
+            if (!IsFinite(f))
+                throw new ArgumentException($"Parameter '{key}' must be a finite number, got '{v}'");
+            return f;
         }
 
         // ── Typed accessors ──
@@ -154,10 +176,10 @@ namespace SimpleMCPBridge.Runtime.Handlers
             return null;
         }
 
-        /// <summary>Required float param (throws when missing). Shared by GameStateHandler (game.wait) etc.</summary>
+        /// <summary>Required float param (throws when missing or non-finite). Shared by GameStateHandler (game.wait) etc.</summary>
         public static float GetRequiredFloat(Dictionary<string, object> dict, string key)
         {
-            return Convert.ToSingle(GetRequiredString(dict, key), CultureInfo.InvariantCulture);
+            return ToFiniteSingle(GetRequiredString(dict, key), key, CultureInfo.InvariantCulture);
         }
 
         public static bool? GetOptionalBool(Dictionary<string, object> dict, string key)
@@ -181,7 +203,10 @@ namespace SimpleMCPBridge.Runtime.Handlers
 
         /// <summary>
         /// Convert an unknown object (from JSON parsing) to float[].
-        /// Handles float[], int[], double[], IList (e.g. List{object}), etc.
+        /// Handles float[], int[], double[], IList (e.g. List{object}), and raw JSON
+        /// array strings like "[1, 2, 3]" (ParseJsonValue returns strings for arrays
+        /// containing quotes/objects — P7: without this, callers silently dropped
+        /// such params, e.g. Vector3 arguments arriving as strings became zero).
         /// Returns null if the value is not a numeric collection.
         /// </summary>
         public static float[] ToFloatArray(object v)
@@ -190,11 +215,26 @@ namespace SimpleMCPBridge.Runtime.Handlers
             if (v is float[] arr) return arr;
             if (v is int[] intArr) return Array.ConvertAll(intArr, i => (float)i);
             if (v is double[] dblArr) return Array.ConvertAll(dblArr, d => (float)d);
+            if (v is string str && str.TrimStart().StartsWith("["))
+            {
+                // Raw JSON array string — split top-level and parse each element.
+                var floatList = new List<float>();
+                var inner = str.Trim();
+                if (inner.Length >= 2 && inner[0] == '[' && inner[inner.Length - 1] == ']')
+                    inner = inner.Substring(1, inner.Length - 2);
+                foreach (var part in SplitJsonTopLevel(inner))
+                {
+                    var trimmed = part.Trim().Trim('"');
+                    if (float.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out var f) && IsFinite(f))
+                        floatList.Add(f);
+                }
+                return floatList.ToArray();
+            }
             if (v is System.Collections.IList list)
             {
                 var result = new List<float>(list.Count);
                 foreach (var item in list)
-                    result.Add(Convert.ToSingle(item, CultureInfo.InvariantCulture));
+                    result.Add(ToFiniteSingle(item, "array element", CultureInfo.InvariantCulture));
                 return result.ToArray();
             }
             return null;
