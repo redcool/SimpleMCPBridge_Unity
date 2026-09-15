@@ -53,12 +53,14 @@ namespace SimpleMCPBridge.Runtime
             if (_bridge != null)
             {
                 _bridge.OnAIResponse -= HandleAIResponse;
+                _bridge.OnAIError -= HandleAIError;
                 _bridge.OnConnectedSuccess -= OnBridgeConnected;
                 _bridge.OnDisconnected -= OnBridgeDisconnected;
             }
 
             _bridge = bridge;
             _bridge.OnAIResponse += HandleAIResponse;
+            _bridge.OnAIError += HandleAIError;
             _bridge.OnConnectedSuccess += OnBridgeConnected;
             _bridge.OnDisconnected += OnBridgeDisconnected;
         }
@@ -70,6 +72,7 @@ namespace SimpleMCPBridge.Runtime
         {
             if (_bridge == null) return;
             _bridge.OnAIResponse -= HandleAIResponse;
+            _bridge.OnAIError -= HandleAIError;
             _bridge.OnConnectedSuccess -= OnBridgeConnected;
             _bridge.OnDisconnected -= OnBridgeDisconnected;
             _bridge = null;
@@ -200,6 +203,16 @@ namespace SimpleMCPBridge.Runtime
             {
                 DebugUtils.LogWarning($"[AIRequest] Ask failed: {ex.Message}");
                 OnResponseReceived?.Invoke(null, null);
+            }
+        }
+
+        private static void HandleAIError(string requestId, string error)
+        {
+            if (_pending.TryGetValue(requestId, out var tcs))
+            {
+                _pending.TryRemove(requestId, out var _);
+                tcs.TrySetException(new Exception(error ?? "AI request failed"));
+                OnResponseReceived?.Invoke(requestId, null);
             }
         }
 

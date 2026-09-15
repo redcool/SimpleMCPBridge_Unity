@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -63,7 +63,7 @@ namespace SimpleMCPBridge
 
             // Check for encrypted wrapper
             var enc = ExtractEncryptedValue(data);
-            if (enc == null) return data; // not encrypted
+            if (enc == null) return null; // strict mode: configured encryption rejects plaintext
 
             try
             {

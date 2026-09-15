@@ -17,6 +17,7 @@ namespace SimpleMCPBridge.Runtime
         private const int ConnectTimeoutMs = 10000;
         private const int DisconnectTimeoutMs = 5000;
         private const int ReceiveBufferSize = 8192; // per ReadAsync call; fragments accumulate via StringBuilder
+        private const int MaxMessageBytes = 4 * 1024 * 1024;
 
         private ClientWebSocket _ws;
         private CancellationTokenSource _cts;
@@ -90,6 +91,7 @@ namespace SimpleMCPBridge.Runtime
                     throw new InvalidOperationException("Not connected");
 
                 var bytes = Encoding.UTF8.GetBytes(message);
+                if (bytes.Length > MaxMessageBytes) throw new InvalidOperationException("Outbound message exceeds 4MB limit");
                 await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cts.Token);
             }
             finally
@@ -155,10 +157,14 @@ namespace SimpleMCPBridge.Runtime
 
                     if (result.MessageType == WebSocketMessageType.Text)
                     {
+                        var totalBytes = result.Count;
+                        if (totalBytes > MaxMessageBytes) throw new WebSocketException("Inbound message exceeds 4MB limit");
                         var sb = new StringBuilder(Encoding.UTF8.GetString(buffer, 0, result.Count));
                         while (!result.EndOfMessage)
                         {
                             result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer), token);
+                            totalBytes += result.Count;
+                            if (totalBytes > MaxMessageBytes) throw new WebSocketException("Inbound message exceeds 4MB limit");
                             sb.Append(Encoding.UTF8.GetString(buffer, 0, result.Count));
                         }
                         OnMessageReceived?.Invoke(sb.ToString());

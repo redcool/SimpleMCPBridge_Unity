@@ -29,6 +29,7 @@ namespace SimpleMCPBridge.Runtime
         // messages (e.g. a flood of tool responses) must not freeze the Unity
         // main thread — the remainder stay in the queue and drain on later frames.
         private const int MaxActionsPerFrame = 12;
+        private const int MaxQueuedActions = 256;
 
         
         private IWebSocketClient _client;
@@ -117,6 +118,8 @@ namespace SimpleMCPBridge.Runtime
         public event Action OnConnectedSuccess;
         /// <summary>Invoked when an AI response arrives from the server (type: ai_response).</summary>
         public event Action<string, string> OnAIResponse; // (requestId, text)
+        /// <summary>Invoked when the server rejects an AI request (requestId, error).</summary>
+        public event Action<string, string> OnAIError;
         /// <summary>Invoked when the bridge disconnects from the server.</summary>
         public event Action OnDisconnected;
 
@@ -323,6 +326,18 @@ namespace SimpleMCPBridge.Runtime
                 // string — ExtractJsonString would return null and we'd silently think
                 // encryption is off (P7: broken security boundary). Parse the bool.
                 _serverEncryptionEnabled = ExtractJsonBool(rawMessage, "encryption");
+                if (!_serverEncryptionEnabled && !string.IsNullOrEmpty(SimpleMCPBridge.BridgeConfig.EncryptionKey))
+                {
+                    LogWarning("Server did not enable encryption; refusing plaintext downgrade");
+                    Disconnect();
+                    return;
+                }
+                if (_serverEncryptionEnabled && string.IsNullOrEmpty(SimpleMCPBridge.BridgeConfig.EncryptionKey))
+                {
+                    LogWarning("Server requires encryption but no key is configured");
+                    Disconnect();
+                    return;
+                }
                 Log($"Server info: encryption={_serverEncryptionEnabled}");
                 // Don't send a response — this is a notification
                 return;
@@ -360,8 +375,12 @@ namespace SimpleMCPBridge.Runtime
                 {
                     var requestId = ExtractJsonString(rawMessage, "requestId");
                     var text = ExtractJsonString(rawMessage, "text");
+                    var error = ExtractJsonString(rawMessage, "error");
                     if (!string.IsNullOrEmpty(requestId))
-                        OnAIResponse?.Invoke(requestId, text ?? "");
+                    {
+                        if (!string.IsNullOrEmpty(error)) OnAIError?.Invoke(requestId, error);
+                        else OnAIResponse?.Invoke(requestId, text ?? "");
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -425,6 +444,11 @@ namespace SimpleMCPBridge.Runtime
                 processed = message;
             }
             Log("MSG QUEUED: " + DescribeMessage(processed));
+            if (_mainThreadQueue.Count >= MaxQueuedActions)
+            {
+                LogWarning($"Inbound queue full ({MaxQueuedActions}); dropping message");
+                return;
+            }
             _mainThreadQueue.Enqueue(() => HandleMessage(processed));
 #if UNITY_EDITOR
             // Wake up Unity's main loop when a message is queued.
